@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hold the Course</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1b2a;--panel:#112236;--line:#1e4060;--text:#d4e8f7;--say:#a8c2d4;--dim:#8aa3b5;
+  --sea:#0b2a45;--ship:#f2f2f2;--goal:#7fd77f;--err:#5b8cff;--p:#8f7cff;--i:#ff6ad5;--d:#4aa3ff;--rud:#c792ea;--wind:#f4a261;--dot:#ef5f6b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px "IBM Plex Mono",monospace;padding:14px;display:flex;justify-content:center}
+main{width:min(1250px,100%)}
+a.btn,button{font:inherit;background:var(--line);color:var(--text);border:0;border-radius:8px;padding:6px 12px;text-decoration:none;cursor:pointer}
+h1{font-size:22px;margin:8px 0 10px}
+.wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:950px){.wrap{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
+#sea{width:100%;height:430px;display:block;border-radius:8px}
+.graphs canvas{width:100%;height:118px;display:block;background:#0a1624;border-radius:6px;margin-bottom:6px}
+.ctl{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:10px}
+.ctl label{display:flex;gap:6px;align-items:center;color:var(--say)}
+.ctl input[type=range]{width:120px}
+.ctl .v{color:var(--text);font-weight:600;min-width:34px}
+.on{font-weight:600}
+.time{display:flex;gap:10px;align-items:center;margin-top:8px}
+.time input{flex:1;accent-color:var(--dot)}
+</style>
+</head>
+<body>
+<main>
+<div><a class="btn" href="index.html">⌂</a> <a class="btn" href="cases.html">cases</a></div>
+<h1>🚢 Hold the course: the PID steers, the sea pushes back</h1>
+<div class="wrap">
+  <div class="panel">
+    <canvas id="sea" width="600" height="430"></canvas>
+    <div class="ctl">
+      <label class="on" style="color:var(--p)"><input type="checkbox" id="useP" checked> P</label>
+      <label class="on" style="color:var(--i)"><input type="checkbox" id="useI" checked> I</label>
+      <label class="on" style="color:var(--d)"><input type="checkbox" id="useD" checked> D</label>
+      <button id="kick">🌊 big wave</button>
+      <button id="pause">⏸</button>
+      <button id="reset">↻</button>
+    </div>
+    <div class="ctl" id="knobs"></div>
+  </div>
+  <div class="panel graphs">
+    <canvas id="g-err"></canvas>
+    <canvas id="g-p"></canvas>
+    <canvas id="g-i"></canvas>
+    <canvas id="g-d"></canvas>
+    <canvas id="g-rud"></canvas>
+    <div class="time"><span>⏸ then drag:</span><input type="range" id="scrub" min="0" max="1" step="0.001" value="1" disabled><b id="tval" style="color:var(--dot)"></b></div>
+  </div>
+</div>
+</main>
+
+<script id="sim">
+// ---------- the ship and the sea (same boat model as the other lessons, plus the sea's pushes) ----------
+const DT = 0.1, KB = 0.2, T = 3, LIMIT = 35;
+function clip(x) {
+  if (x > LIMIT) { return LIMIT; }
+  if (x < -LIMIT) { return -LIMIT; }
+  return x;
+}
+// a repeatable "random": the same sea every time you press ↻
+function makeRandom(seed) {
+  let s = seed;
+  return function () { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+}
+// how hard the sea turns the bow at time t (°/s²): steady wind + waves + gusts + any big wave you sent
+function seaPush(sea, t) {
+  const waves = sea.waves * (Math.sin(t * 2 * Math.PI / 7) + 0.6 * Math.sin(t * 2 * Math.PI / 3.3 + 1));
+  let gust = 0;
+  for (const g of sea.gusts) {
+    if (t >= g.at && t < g.at + g.len) { gust += g.size; }
+  }
+  return { wind: sea.wind, waves, gust, total: sea.wind + waves + gust };
+}
+function makeGusts(seed, seconds) {
+  const rnd = makeRandom(seed), list = [];
+  let t = 6;
+  while (t < seconds) {
+    list.push({ at: t, len: 1.5 + rnd() * 2, size: (rnd() < 0.5 ? -1 : 1) * (0.8 + rnd() * 1.2) });
+    t += 8 + rnd() * 10;
+  }
+  return list;
+}
+function makeShip() {
+  return { t: 0, heading: 90, turn: 0, x: 0, y: 0, sum: 0, hist: [] };
+}
+// one 0.1 s step: the PID decides the rudder from the error, then the sea and the rudder turn the ship
+function shipStep(ship, pid, sea, goal) {
+  const error = goal - ship.heading;
+  let p = 0, i = 0, d = 0;
+  if (pid.useP) { p = pid.Kp * error; }
+  if (pid.useD) { d = pid.Kd * (-ship.turn); }           // slope of the error = minus the turn speed
+  if (pid.useI) {
+    const wantsIfAdded = p + pid.Ki * (ship.sum + error * DT) + d;
+    if (Math.abs(wantsIfAdded) < LIMIT) { ship.sum += error * DT; }   // anti-windup: stop adding while the rudder is stuck
+    i = pid.Ki * ship.sum;
+  }
+  const rudder = clip(p + i + d);
+  const push = seaPush(sea, ship.t);
+  ship.hist.push({ t: ship.t, heading: ship.heading, error, p, i, d, rudder, push: push.total, x: ship.x, y: ship.y });
+  const turn = ship.turn + DT * ((KB * rudder - ship.turn) / T + push.total);
+  ship.heading += DT * turn;
+  ship.turn = turn;
+  const speed = 6;                                            // the motor: forward 6 m/s along the heading
+  ship.x += DT * speed * Math.sin(ship.heading * Math.PI / 180);
+  ship.y -= DT * speed * Math.cos(ship.heading * Math.PI / 180);
+  ship.t += DT;
+}
+</script>
+
+<script>
+const CFG = { goal: 90, Kp: 3.5, Ki: 0.1, Kd: 6, wind: -0.8, waves: 0.25 };
+const KNOBS = [
+  ["goal", "course", 45, 135, 5, "°"], ["Kp", "Kp", 0, 8, 0.25, ""], ["Ki", "Ki", 0, 0.4, 0.01, ""], ["Kd", "Kd", 0, 15, 0.5, ""],
+  ["wind", "wind", -1.2, 1.2, 0.1, ""], ["waves", "waves", 0, 1, 0.05, ""],
+];
+const knobBox = document.getElementById("knobs");
+knobBox.innerHTML = KNOBS.map(([k, label, lo, hi, st, unit]) =>
+  `<label>${label} <input type="range" id="k-${k}" min="${lo}" max="${hi}" step="${st}" value="${CFG[k]}"><span class="v" id="v-${k}"></span></label>`).join("");
+for (const [k, , , , , unit] of KNOBS) {
+  const el = document.getElementById("k-" + k);
+  const show = () => { document.getElementById("v-" + k).textContent = CFG[k] + unit; };
+  el.addEventListener("input", () => { CFG[k] = parseFloat(el.value); show(); sea.wind = CFG.wind; sea.waves = CFG.waves; });
+  show();
+}
+let ship, sea, paused = false, acc = 0, last = performance.now();
+function reset() {
+  ship = makeShip();
+  sea = { wind: CFG.wind, waves: CFG.waves, gusts: makeGusts(7, 100000) };
+}
+reset();
+document.getElementById("reset").onclick = reset;
+document.getElementById("kick").onclick = () => { sea.gusts.push({ at: ship.t, len: 1.2, size: 4 }); };
+const scrub = document.getElementById("scrub");
+document.getElementById("pause").onclick = () => {
+  paused = !paused;
+  document.getElementById("pause").textContent = paused ? "▶" : "⏸";
+  scrub.disabled = !paused;
+  scrub.value = 1;
+};
+const pidNow = () => ({ Kp: CFG.Kp, Ki: CFG.Ki, Kd: CFG.Kd,
+  useP: document.getElementById("useP").checked, useI: document.getElementById("useI").checked, useD: document.getElementById("useD").checked });
+
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function fit(cv) {
+  const r = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * r)) { cv.width = Math.round(w * r); cv.height = Math.round(h * r); }
+  const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+  return { g, w, h };
+}
+// ---------- the sea view: the ship follows its course, the wake shows where it went ----------
+function drawSea(row) {
+  const { g, w, h } = fit(document.getElementById("sea"));
+  g.fillStyle = css("--sea"); g.fillRect(0, 0, w, h);
+  const cx = w / 2, cy = h / 2, scale = 1.6;            // the camera follows the ship
+  // wave lines drifting
+  g.strokeStyle = "rgba(168,194,212,.10)"; g.lineWidth = 2;
+  for (let k = -8; k < 16; k++) {
+    const y0 = ((k * 40 - row.y * scale + ship.t * 6) % (h + 80) + h + 80) % (h + 80) - 40;
+    g.beginPath();
+    for (let x = 0; x <= w; x += 12) { const yy = y0 + 5 * Math.sin((x + row.x * scale) / 40 + ship.t); if (x === 0) { g.moveTo(x, yy); } else { g.lineTo(x, yy); } }
+    g.stroke();
+  }
+  // the goal course: a green dashed line through the ship
+  const ga = (CFG.goal - 90) * Math.PI / 180;
+  g.setLineDash([10, 8]); g.strokeStyle = css("--goal"); g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx - Math.cos(ga) * 600, cy - Math.sin(ga) * 600); g.lineTo(cx + Math.cos(ga) * 600, cy + Math.sin(ga) * 600); g.stroke(); g.setLineDash([]);
+  // the wake: where the ship really went
+  g.strokeStyle = "rgba(242,242,242,.45)"; g.lineWidth = 2; g.beginPath();
+  const hist = ship.hist, upto = hist.indexOf(row);
+  for (let n = Math.max(0, upto - 900); n <= upto; n++) {
+    const px = cx + (hist[n].x - row.x) * scale, py = cy + (hist[n].y - row.y) * scale;
+    if (n === Math.max(0, upto - 900)) { g.moveTo(px, py); } else { g.lineTo(px, py); }
+  }
+  g.stroke();
+  // the ship + its rudder
+  g.save(); g.translate(cx, cy); g.rotate(row.heading * Math.PI / 180);
+  g.fillStyle = css("--ship");
+  g.beginPath(); g.moveTo(0, -34); g.quadraticCurveTo(13, -8, 10, 26); g.lineTo(-10, 26); g.quadraticCurveTo(-13, -8, 0, -34); g.fill();
+  g.translate(0, 26); g.rotate(-row.rudder * Math.PI / 180);
+  g.strokeStyle = css("--rud"); g.lineWidth = 5; g.lineCap = "round"; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 16); g.stroke();
+  g.restore();
+  // the sea's push: an orange curved arrow at the bow, bigger = harder
+  const push = row.push;
+  if (Math.abs(push) > 0.05) {
+    const r = 54, a0 = (row.heading - 90) * Math.PI / 180, span = Math.max(-1.4, Math.min(1.4, push * 0.6));
+    g.strokeStyle = css("--wind"); g.lineWidth = 5; g.beginPath(); g.arc(cx, cy, r, Math.min(a0, a0 + span), Math.max(a0, a0 + span)); g.stroke();
+    g.font = "600 13px IBM Plex Mono"; g.fillStyle = css("--wind"); g.textAlign = "left"; g.fillText("sea push", cx + 60, cy - 58);
+  }
+  // numbers
+  g.font = "600 16px IBM Plex Mono"; g.textAlign = "left";
+  g.fillStyle = css("--goal"); g.fillText("course " + CFG.goal + "°", 14, 26);
+  g.fillStyle = css("--ship"); g.fillText("heading " + row.heading.toFixed(1) + "°", 14, 50);
+  g.fillStyle = css("--err"); g.fillText("error " + row.error.toFixed(1) + "°", 14, 74);
+  g.fillStyle = css("--rud"); g.fillText("rudder " + row.rudder.toFixed(1) + "°", 14, 98);
+}
+// ---------- the graphs: normal axes, last 30 s, a red dot at the moment shown ----------
+const WINDOW = 30;
+const GRAPHS = [
+  { id: "g-err", key: "error", col: "--err", name: "error (°)", lo: -15, hi: 15, ticks: [-10, 0, 10] },
+  { id: "g-p", key: "p", col: "--p", name: "P", lo: -40, hi: 40, ticks: [-30, 0, 30] },
+  { id: "g-i", key: "i", col: "--i", name: "I", lo: -20, hi: 20, ticks: [-15, 0, 15] },
+  { id: "g-d", key: "d", col: "--d", name: "D", lo: -40, hi: 40, ticks: [-30, 0, 30] },
+  { id: "g-rud", key: "rudder", col: "--rud", name: "rudder (°)", lo: -40, hi: 40, ticks: [-35, 0, 35] },
+];
+function drawGraph(G, row) {
+  const { g, w, h } = fit(document.getElementById(G.id));
+  const L = 40, R = w - 8, Tp = 18, B = h - 20;
+  const tEnd = Math.max(WINDOW, row.t), tStart = tEnd - WINDOW;
+  const X = t => L + (t - tStart) / WINDOW * (R - L);
+  const Y = v => B - (Math.max(G.lo, Math.min(G.hi, v)) - G.lo) / (G.hi - G.lo) * (B - Tp);
+  g.font = "11px IBM Plex Mono"; g.lineWidth = 1;
+  for (const v of G.ticks) {
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(R, Y(v)); g.stroke();
+    g.fillStyle = css("--dim"); g.textAlign = "right"; g.fillText(String(v), L - 5, Y(v) + 4);
+  }
+  for (let t = Math.ceil(tStart / 5) * 5; t <= tEnd; t += 5) {
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.beginPath(); g.moveTo(X(t), Tp); g.lineTo(X(t), B); g.stroke();
+    g.fillStyle = css("--dim"); g.textAlign = "center"; g.fillText(t + "s", X(t), h - 5);
+  }
+  g.strokeStyle = css("--dim"); g.lineWidth = 1.5;
+  g.beginPath(); g.moveTo(L, Tp - 4); g.lineTo(L, B); g.stroke();
+  g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(R, Y(0)); g.stroke();
+  if (G.key === "rudder") {
+    g.setLineDash([4, 4]); g.strokeStyle = css("--dot");
+    for (const v of [LIMIT, -LIMIT]) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(R, Y(v)); g.stroke(); }
+    g.setLineDash([]);
+  }
+  g.strokeStyle = css(G.col); g.lineWidth = 2.2; g.beginPath();
+  let first = true;
+  for (const p of ship.hist) {
+    if (p.t < tStart) { continue; }
+    if (p.t > row.t + 1e-9 && !paused) { break; }
+    if (first) { g.moveTo(X(p.t), Y(p[G.key])); first = false; } else { g.lineTo(X(p.t), Y(p[G.key])); }
+  }
+  g.stroke();
+  const dx = X(row.t), dy = Y(row[G.key]);
+  g.strokeStyle = "rgba(239,95,107,.6)"; g.setLineDash([3, 3]); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(dx, dy); g.lineTo(dx, B); g.stroke(); g.beginPath(); g.moveTo(dx, dy); g.lineTo(L, dy); g.stroke(); g.setLineDash([]);
+  g.fillStyle = css("--dot"); g.beginPath(); g.arc(dx, dy, 6, 0, 7); g.fill();
+  g.font = "600 13px IBM Plex Mono"; g.textAlign = "left"; g.fillStyle = css(G.col);
+  g.fillText(G.name + " = " + row[G.key].toFixed(1), L + 6, 13);
+}
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!paused) {
+    acc += dt;
+    const pid = pidNow();
+    while (acc >= DT) { shipStep(ship, pid, sea, CFG.goal); acc -= DT; }
+  }
+  if (ship.hist.length) {
+    let row = ship.hist[ship.hist.length - 1];
+    if (paused) {   // drag back through the last 30 s
+      const n = ship.hist.length, back = Math.round((1 - parseFloat(scrub.value)) * Math.min(n - 1, WINDOW / DT));
+      row = ship.hist[n - 1 - back];
+    }
+    document.getElementById("tval").textContent = row.t.toFixed(1) + " s";
+    drawSea(row);
+    for (const G of GRAPHS) { drawGraph(G, row); }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
