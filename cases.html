@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P, I, D by Cases</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1b2a;--panel:#112236;--line:#1e4060;--text:#d4e8f7;--say:#a8c2d4;--dim:#8aa3b5;
+  --err:#5b8cff;--p:#8f7cff;--i:#ff6ad5;--d:#4aa3ff;--now:#7fd77f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px "IBM Plex Mono",monospace;padding:16px;display:flex;justify-content:center}
+main{width:min(1200px,100%)}
+h1{font-size:24px;margin:0 0 4px}
+.sub{color:var(--say);margin:0 0 14px}
+a.btn{font:inherit;background:var(--line);color:var(--text);border-radius:8px;padding:5px 12px;text-decoration:none;margin-right:8px}
+.head,.row{display:grid;grid-template-columns:180px repeat(4,1fr);gap:8px;align-items:stretch}
+.head div{color:var(--dim);text-align:center;padding:4px 0;font-weight:600}
+.head .e{color:var(--err)} .head .p{color:var(--p)} .head .i{color:var(--i)} .head .d{color:var(--d)}
+.case{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
+.name{font-weight:600;font-size:15px;display:flex;align-items:center}
+canvas{width:100%;height:120px;background:#0a1624;border-radius:8px;display:block}
+.words{display:grid;grid-template-columns:180px repeat(4,1fr);gap:8px;margin-top:6px;color:var(--say);font-size:13px}
+.words div{text-align:center}
+@media (max-width:800px){.head,.row,.words{grid-template-columns:1fr 1fr}.head div:first-child,.row .name,.words div:first-child{grid-column:1/-1}}
+</style>
+</head>
+<body>
+<main>
+<div style="margin-bottom:10px"><a class="btn" href="index.html">⌂</a><a class="btn" href="pid.html">lesson 2</a></div>
+<h1>P · I · D: one error, three readings</h1>
+<p class="sub">Each row = one kind of error. The green line is "now", moving left to right. Kp = 1 · Ki = 0.2 · Kd = 1</p>
+<div class="head"><div></div><div class="e">error</div><div class="p">P = height</div><div class="i">I = area so far</div><div class="d">D = slope</div></div>
+<div id="rows"></div>
+</main>
+<script>
+// ---------- the 8 error shapes, over 10 seconds ----------
+const DT = 0.1, SECONDS = 10, KP = 1, KI = 0.2, KD = 1;
+const CASES = [
+  { name: "1 · no error", e: t => 0,
+    words: ["", "0: nothing to fix", "0: nothing to add", "0: nothing changes"] },
+  { name: "2 · small, steady", e: t => 10,
+    words: ["", "small steady push", "grows slowly, never stops", "0: error not changing"] },
+  { name: "3 · big, steady", e: t => 30,
+    words: ["", "big steady push", "grows fast", "0: big, but not changing"] },
+  { name: "4 · comes, then goes", e: t => { if (t >= 2 && t < 6) { return 20; } return 0; },
+    words: ["", "on while it's there", "climbs, then STAYS (memory)", "spike at each jump"] },
+  { name: "5 · grows steadily", e: t => { if (t < 2) { return 0; } if (t < 7) { return 4 * (t - 2); } return 20; },
+    words: ["", "follows the error", "bends upward", "flat 4 while growing, 0 after"] },
+  { name: "6 · grows faster and faster", e: t => { if (t < 2) { return 0; } if (t < 7) { return 0.8 * (t - 2) * (t - 2); } return 20; },
+    words: ["", "follows the error", "grows faster and faster", "a ramp: the slope itself grows"] },
+  { name: "7 · shrinks (we're fixing it)", e: t => 30 - 3 * t,
+    words: ["", "smaller and smaller", "still grows (error still > 0), slower", "−3: the BRAKE"] },
+  { name: "8 · goes past the goal", e: t => 20 - 4 * t,
+    words: ["", "turns negative: push back", "peaks at error 0, then shrinks", "−4: steady pull back"] },
+];
+// every case → rows of {t, e, p, i, d}: P = Kp × error, I = Ki × (area so far), D = Kd × slope
+for (const c of CASES) {
+  c.rows = [];
+  let area = 0, prev = c.e(0);
+  for (let n = 0; n <= SECONDS / DT; n++) {
+    const t = n * DT, e = c.e(t);
+    let slope = 0;
+    if (n > 0) { slope = (e - prev) / DT; }
+    area += e * DT;
+    c.rows.push({ t, e, p: KP * e, i: KI * area, d: KD * slope });
+    prev = e;
+  }
+}
+// one fixed scale per column, so rows can be compared by eye
+const SCALE = { e: [-25, 35], p: [-25, 35], i: [-10, 70], d: [-10, 12] };
+const COL = { e: "--err", p: "--p", i: "--i", d: "--d" };
+
+// ---------- build the page ----------
+const box = document.getElementById("rows");
+CASES.forEach((c, k) => {
+  const div = document.createElement("div");
+  div.className = "case";
+  div.innerHTML = `<div class="row"><div class="name">${c.name}</div>` +
+    ["e", "p", "i", "d"].map(key => `<canvas id="c${k}${key}"></canvas>`).join("") + `</div>` +
+    `<div class="words"><div></div><div></div>` + c.words.slice(1).map(w => `<div>${w}</div>`).join("") + `</div>`;
+  box.appendChild(div);
+});
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function draw(cv, rows, key, now) {
+  const r = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * r)) { cv.width = Math.round(w * r); cv.height = Math.round(h * r); }
+  const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
+  const [lo, hi] = SCALE[key], L = 8, R = w - 8, T = 18, B = h - 8;
+  const X = t => L + t / SECONDS * (R - L);
+  const Y = v => B - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * (B - T);
+  g.strokeStyle = css("--line"); g.lineWidth = 1; g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(R, Y(0)); g.stroke();   // the zero line
+  g.strokeStyle = css(COL[key]); g.lineWidth = 2.5; g.beginPath();
+  rows.forEach((p, n) => { if (n === 0) { g.moveTo(X(p.t), Y(p[key])); } else { g.lineTo(X(p.t), Y(p[key])); } });
+  g.stroke();
+  const cur = rows[Math.min(rows.length - 1, Math.round(now / DT))];
+  g.strokeStyle = css("--now"); g.lineWidth = 2; g.beginPath(); g.moveTo(X(now), T - 6); g.lineTo(X(now), B); g.stroke();
+  g.fillStyle = css(COL[key]); g.beginPath(); g.arc(X(now), Y(cur[key]), 5, 0, 7); g.fill();
+  let v = cur[key];
+  let label = (Math.round(v * 10) / 10).toFixed(1);
+  if (key === "d" && Math.abs(v) > 50) { label = (v > 0 ? "+" : "−") + "huge (a jump)"; }
+  g.font = "600 13px IBM Plex Mono"; g.textAlign = "right"; g.fillStyle = css(COL[key]); g.fillText(label, R, 14);
+}
+let t0 = performance.now();
+function frame(nowMs) {
+  const loop = 9;                                    // 7 s to sweep, 2 s to hold the end
+  const s = ((nowMs - t0) / 1000) % loop;
+  const now = Math.min(SECONDS, s / 7 * SECONDS);
+  CASES.forEach((c, k) => { for (const key of ["e", "p", "i", "d"]) { draw(document.getElementById("c" + k + key), c.rows, key, now); } });
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
