@@ -95,12 +95,27 @@ function turnArrow(cx, cy, r, heading, turn) {          // curved arrow at the n
   g.lineTo(tx - Math.cos(tip) * 9, ty - Math.sin(tip) * 9); g.fill();
 }
 function miniGraph(x, y, w, h, rows, key, tNow, tMax, vMax, col, label, marks) {
-  g.strokeStyle = C("--line"); g.lineWidth = 1; g.strokeRect(x, y, w, h);
-  text(label, x + 8, y + 18, 14, col, "left");
-  const X = t => x + t / tMax * w, Y = v => y + h - v / vMax * (h - 26);
+  // a normal graph: y axis with numbers on the left, x axis = time in seconds at the bottom
+  const L = x + 44, R = x + w - 10, Tp = y + 26, B = y + h - 22;
+  const X = t => L + t / tMax * (R - L), Y = v => B - v / vMax * (B - Tp);
+  text(label, L, y + 14, 14, col, "left");
+  g.font = "12px IBM Plex Mono"; g.lineWidth = 1;
+  const step = vMax > 10 ? 5 : 1;
+  for (let v = 0; v <= vMax + 1e-9; v += step) {
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(R, Y(v)); g.stroke();
+    g.fillStyle = C("--dim"); g.textAlign = "right"; g.fillText(String(v), L - 6, Y(v) + 4);
+  }
+  for (let t = 0; t <= tMax; t += 3) {
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.beginPath(); g.moveTo(X(t), Tp); g.lineTo(X(t), B); g.stroke();
+    g.fillStyle = C("--dim"); g.textAlign = "center"; g.fillText(t + "s", X(t), B + 16);
+  }
+  g.strokeStyle = C("--dim"); g.lineWidth = 1.5;
+  g.beginPath(); g.moveTo(L, Tp - 6); g.lineTo(L, B); g.lineTo(R, B); g.stroke();
   g.strokeStyle = col; g.lineWidth = 3; g.beginPath();
   for (const p of rows) { if (p.t > tNow) { break; } if (p.t === 0) { g.moveTo(X(p.t), Y(p[key])); } else { g.lineTo(X(p.t), Y(p[key])); } }
   g.stroke();
+  const cur = rows[Math.min(rows.length - 1, Math.floor(tNow / DT))];   // the red dot = now
+  g.fillStyle = "#ef5f6b"; g.beginPath(); g.arc(X(cur.t), Y(cur[key]), 6, 0, 7); g.fill();
   for (const m of (marks || [])) {
     if (tNow < m.t) { continue; }
     g.fillStyle = col; g.beginPath(); g.arc(X(m.t), Y(m.v), 6, 0, 7); g.fill();
