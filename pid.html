@@ -18,6 +18,8 @@ h1{font-size:28px;margin:6px 0 4px}
 canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display:block}
 .cap{font-size:22px;color:var(--say);margin:14px 0 4px;text-align:center}
 .hint{color:var(--dim);font-size:13px}
+.mine{display:none;width:min(1000px,100%);margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 16px;font-size:16px;line-height:1.8}
+.mine .k{color:var(--dim);display:inline-block;min-width:130px}
 .calc{display:none;width:min(1000px,100%);margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 18px}
 .calc h3{margin:0 0 8px;font-size:18px}
 .calc label{display:flex;gap:12px;align-items:center;margin:6px 0;color:var(--say)}
@@ -31,6 +33,7 @@ canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display
 <h1 id="title"></h1>
 <canvas id="cv" width="1000" height="520"></canvas>
 <div class="cap" id="cap"></div>
+<div class="mine" id="mine"></div>
 <div class="hint">← → next screen · space = pause · it loops</div>
 <div class="calc" id="calc">
   <h3>🧮 P calculator: drag the error and Kp</h3>
@@ -552,6 +555,30 @@ const SCREENS = [
   } },
 ];
 
+// ---------- the formulas, two ways: the textbook's and mine (X, Y, Z = how many rudder degrees per unit) ----------
+const CLAMP = "clamp(…, −35, +35) = Mathf.Clamp: the rudder can't go further";
+const FORMULAS = {
+  "the loop": ["error = setpoint − process variable", "error = goal − where the nose is · rudder = clamp(P + I + D, −35, +35)"],
+  "the parts, one by one": ["setpoint → ± → PID → output → final control element → process → transmitter", "goal → compare → brain → order → rudder → ship → compass → back"],
+  "what the order means": ["output = P + I + D", "sign = which way · size = how hard · rudder = clamp(order, −35, +35)"],
+  "P = Kp × error": ["P = Kp · e(t)", "P = X × error · X = rudder ° per 1° wrong (here X = 0.5) · rudder = clamp(P, −35, +35)"],
+  "P alone on the boat": ["P = Kp · e(t), Kp = 3", "rudder = clamp(3 × error, −35, +35) · above 35 / 3 = 11.7° wrong → always full 35°"],
+  "offset: P alone + wind": ["P = Kp · e(t) → steady-state error (offset)", "the wind needs 9° rudder · 9 = X × error → error must stay 9 / X"],
+  "I without wind": ["I = Ki · ∫ e(t) dt", "every 0.1 s: sum = sum + error × 0.1 · I = Y × sum (Y = 0.1)"],
+  "I = Ki × (error × time)": ["I = Ki · ∫ e(t) dt", "every 0.1 s: sum = sum + error × 0.1 · I = Y × sum · rudder = clamp(X·error + I, −35, +35)"],
+  "P + I on the boat, in the wind": ["u = Kp · e + Ki · ∫ e dt", "rudder = clamp(X × error + Y × sum, −35, +35) · X = 1, Y = 0.05"],
+  "D = Kd × slope": ["D = Kd · de(t)/dt", "D = Z × how fast the error changes = Z × (−turn) · Z = 6"],
+  "D on the boat = the brake": ["u = Kp · e + Kd · de/dt", "rudder = clamp(X × error + Z × (−turn), −35, +35) · X = 3, Z = 6"],
+  "arrive from ONE side (like a limit)": ["more Kd → overdamped: no overshoot", "bigger Z = a stronger brake → never past 90°, but later"],
+  "each one ALONE": ["P = Kp·e · I = Ki·∫e dt · D = Kd·de/dt", "only X: works · only Y: swings · only Z: never moves (no turn → no brake)"],
+  "tuning: all three": ["u = Kp·e + Ki·∫e dt + Kd·de/dt", "rudder = clamp(X·error + Y·sum + Z·(−turn), −35, +35) · X 3.5, Y 0.1, Z 6"],
+};
+function showFormulas() {
+  const f = FORMULAS[SCREENS[idx].title], box = document.getElementById("mine");
+  if (!f) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.innerHTML = `<span class="k">📘 textbook</span>${f[0]}<br><span class="k">📝 my way</span><b>${f[1]}</b>`;
+}
 // ---------- player ----------
 let idx = 0, t0 = performance.now(), paused = false, pausedAt = 0;
 const dots = document.getElementById("dots");
@@ -566,6 +593,7 @@ function show(i) {
   let showCalc = "none";
   if (SCREENS[idx].title === "P = Kp × error") { showCalc = "block"; }
   document.getElementById("calc").style.display = showCalc;
+  showFormulas();
 }
 document.getElementById("prev").onclick = e => { e.currentTarget.blur(); show(idx - 1); };
 document.getElementById("next").onclick = e => { e.currentTarget.blur(); show(idx + 1); };
@@ -611,11 +639,14 @@ function calcPaint() {
   let way = "straight";
   if (rudder > 0) { way = "turn RIGHT"; }
   if (rudder < 0) { way = "turn LEFT"; }
+  let clampAt = "   · X = 0: never turns";
+  if (kp > 0) { clampAt = "   · clamped when |error| > 35 / " + kp.toFixed(1) + " = " + fmt(35 / kp) + "°"; }
   document.getElementById("cErrV").textContent = error + "°";
   document.getElementById("cKpV").textContent = kp.toFixed(1);
   document.getElementById("cOut").innerHTML =
     `<span style="color:var(--p)">P</span> = Kp × error = ${kp.toFixed(1)} × ${error} = <b style="color:var(--p)">${fmt(p)}</b>${note}\n` +
-    `<span style="color:var(--rud)">rudder</span> = <b style="color:var(--rud)">${fmt(rudder)}°</b> → ${way}`;
+    `<span style="color:var(--rud)">rudder</span> = <b style="color:var(--rud)">${fmt(rudder)}°</b> → ${way}` +
+    `\n📝 rudder = clamp(${kp.toFixed(1)} × error, −35, +35)` + clampAt;
   // the rudder ruler: −35 … +35, the P order (may be outside) and the real rudder
   const cv = document.getElementById("cCv"), c = cv.getContext("2d"), r = window.devicePixelRatio || 1;
   cv.width = 960 * r; cv.height = 110 * r; c.setTransform(r, 0, 0, r, 0, 0);
