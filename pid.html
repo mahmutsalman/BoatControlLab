@@ -342,9 +342,17 @@ const SCREENS = [
       g.fillStyle = "rgba(91,140,255,.25)"; g.fillRect(gr1.X(0), gr1.Y(20), gr1.X(Math.min(t, 6)) - gr1.X(0), gr1.Y(0) - gr1.Y(20));
       g.fillStyle = "rgba(79,224,176,.15)"; g.fillRect(gr1.X(0), gr1.Y(40), gr1.X(Math.min(t, 8)) - gr1.X(0), gr1.Y(20) - gr1.Y(40));
       graph(80, 310, 420, 160, { tMax: 12, vMin: 0, vMax: 340, now: t, label: "area so far (the sum)", series: [{ rows: SMALL, value: x => areaUpTo(SMALL, x.t), col: C("--err") }, { rows: BIG, value: x => areaUpTo(BIG, x.t), col: C("--err2") }] });
-      text("20° for 6 s", 760, 130, 20, C("--err")); text("= " + fmt(areaUpTo(SMALL, t)), 760, 170, 30, C("--err"));
-      text("40° for 8 s", 760, 290, 20, C("--err2")); text("= " + fmt(areaUpTo(BIG, t)), 760, 330, 30, C("--err2"));
-      text("error gone → the sum stays", 760, 440, 16, C("--say"), "center", false);
+      // the blue case on a boat: 20° off for 6 s; I's order = Ki × sum (Ki = 0.1)
+      const e = at(SMALL, t).e, sum = areaUpTo(SMALL, t), iOrder = 0.1 * sum;
+      text("blue boat: 20° off for 6 s", 760, 28, 15, C("--err"));
+      boat(760, 150, 95, 90 - e, Math.min(LIMIT, iOrder));
+      text("error " + fmt(e) + "°", 760, 290, 18, C("--err"));
+      text("sum = " + fmt(sum) + " (°·s)", 760, 320, 17, C("--err"));
+      text("I = 0.1 × " + fmt(sum) + " = " + fmt(iOrder), 760, 350, 18, C("--i"));
+      text("rudder " + fmt(Math.min(LIMIT, iOrder)) + "°", 760, 380, 18, C("--rud"));
+      if (e === 0 && sum > 0) { text("error 0, but I STILL pushes " + fmt(iOrder) + "°", 760, 412, 15, C("--far")); }
+      text("green: 40° for 8 s → sum " + fmt(areaUpTo(BIG, t)) + " → I " + fmt(0.1 * areaUpTo(BIG, t)), 760, 455, 14, C("--err2"), "center", false);
+      text("error gone → the sum stays → I keeps its push", 760, 490, 14, C("--say"), "center", false);
   } },
   { title: "P + I on the boat, in the wind", cap: "I slowly takes over the 9° → error goes to 0 (Kp 1, Ki 0.05)", dur: 50, speed: 3, draw(t) {
       const r = at(PI_WIND, t);
@@ -358,9 +366,17 @@ const SCREENS = [
   { title: "D = Kd × slope", cap: "D looks at how FAST the error changes, not how big it is (Kd = 2)", dur: 10, draw(t) {
       graph(560, 60, 380, 150, { tMax: 10, vMin: 0, vMax: 55, now: t, label: "error", series: [{ rows: RAMP5, value: x => x.e, col: C("--err") }, { rows: RAMP8, value: x => x.e, col: C("--err2") }] });
       graph(560, 300, 380, 150, { tMax: 10, vMin: 0, vMax: 20, now: t, label: "D action", series: [{ rows: RAMP5, value: x => 2 * slopeAt(x.t, 5), col: C("--err") }, { rows: RAMP8, value: x => 2 * slopeAt(x.t, 8), col: C("--err2") }] });
-      text("slope 5°/s", 200, 150, 20, C("--err")); text("D = 2 × 5 = " + 2 * slopeAt(t, 5), 200, 190, 24, C("--err"));
-      text("slope 8°/s", 200, 290, 20, C("--err2")); text("D = 2 × 8 = " + 2 * slopeAt(t, 8), 200, 330, 24, C("--err2"));
-      text("on our boat: slope of error = −turn", 280, 450, 17, C("--turn"));
+      // the blue case on a boat: the nose drifts AWAY from the line at 5°/s; D's order = Kd × slope (Kd = 2)
+      const e = at(RAMP5, t).e, slope = slopeAt(t, 5), dOrder = 2 * slope;
+      text("blue boat: drifting away at 5°/s", 250, 28, 15, C("--err"));
+      boat(250, 150, 95, 90 - e, dOrder);
+      text("error " + fmt(e) + "°", 250, 290, 18, C("--err"));
+      text("slope " + fmt(slope) + "°/s", 250, 320, 17, C("--err"));
+      text("D = 2 × " + fmt(slope) + " = " + fmt(dOrder), 250, 350, 18, C("--d"));
+      text("rudder " + fmt(dOrder) + "°", 250, 380, 18, C("--rud"));
+      if (t > 7) { text("error " + fmt(e) + "° but NOT changing → D = 0", 250, 412, 15, C("--far")); }
+      text("green: slope 8°/s → D = 2 × 8 = " + fmt(2 * slopeAt(t, 8)), 250, 455, 14, C("--err2"), "center", false);
+      text("on our boat: slope of error = −turn", 250, 490, 14, C("--turn"), "center", false);
   } },
   { title: "D on the boat = the brake", cap: "D pulls the rudder back early → no swing past the line", dur: 30, speed: 2, draw(t) {
       const a = at(P_ALONE, t), b = at(PD, t);
