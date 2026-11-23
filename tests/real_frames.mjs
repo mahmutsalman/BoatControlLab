@@ -14,7 +14,7 @@ const ctx2d = new Proxy({}, { get: (o, k) => {
   };
 }, set: (o, k, v) => { o[k] = v; return true; } });
 let raf = null;
-const el = () => ({ style: {}, value: "50", getContext: () => ctx2d, width: 0, height: 520, clientWidth: 1000, clientHeight: 520, textContent: "", innerHTML: "", children: [], dataset: {}, classList: { toggle() {} }, addEventListener() {} });
+const el = () => ({ style: {}, value: "50", blur() {}, getContext: () => ctx2d, width: 0, height: 520, clientWidth: 1000, clientHeight: 520, textContent: "", innerHTML: "", children: [], dataset: {}, classList: { toggle() {} }, addEventListener() {} });
 const els = {};
 let clock = 0;
 const sb = { document: { getElementById: id => (els[id] ||= el()), documentElement: {} }, getComputedStyle: () => ({ getPropertyValue: () => "#fff" }),

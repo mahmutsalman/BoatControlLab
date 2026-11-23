@@ -232,15 +232,16 @@ const LESSONS = [
 let idx = 0, t0 = performance.now(), paused = false, pausedAt = 0;
 const dots = document.getElementById("dots");
 dots.innerHTML = LESSONS.map((_, i) => `<div class="dot" data-i="${i}"></div>`).join("");
-dots.onclick = e => { if (e.target.dataset.i) { show(+e.target.dataset.i); } };
+dots.onclick = e => { if (e.target.dataset.i) { show(+e.target.dataset.i); } if (document.activeElement) { document.activeElement.blur(); } };
 function show(i) {
   idx = (i + LESSONS.length) % LESSONS.length; t0 = performance.now(); pausedAt = t0;
   document.getElementById("title").textContent = (idx + 1) + " · " + LESSONS[idx].title;
   document.getElementById("cap").textContent = LESSONS[idx].cap;
   [...dots.children].forEach((d, k) => d.classList.toggle("on", k === idx));
 }
-document.getElementById("prev").onclick = () => show(idx - 1);
-document.getElementById("next").onclick = () => show(idx + 1);
+document.getElementById("prev").onclick = e => { e.currentTarget.blur(); show(idx - 1); };
+document.getElementById("next").onclick = e => { e.currentTarget.blur(); show(idx + 1); };
+window.addEventListener("keyup", e => { if (e.key === " ") { e.preventDefault(); } });
 window.addEventListener("keydown", e => {
   if (e.key === "ArrowRight") { show(idx + 1); }
   if (e.key === "ArrowLeft") { show(idx - 1); }
@@ -266,6 +267,11 @@ function frame(now) {
     g.setTransform(1, 0, 0, 1, 0, 0); g.font = "600 18px IBM Plex Mono"; g.fillStyle = "#ef5f6b"; g.textAlign = "left";
     g.fillText("screen error: " + err.message, 20, 40);
     console.error(err);
+  }
+  if (paused) {                                       // show that space DID something
+    g.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    g.fillStyle = "rgba(239,95,107,.9)"; g.fillRect(860, 12, 124, 34);
+    g.font = "600 17px IBM Plex Mono"; g.fillStyle = "#fff"; g.textAlign = "center"; g.fillText("⏸ paused", 922, 35);
   }
 }
 show(0);
