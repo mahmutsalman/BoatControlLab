@@ -141,9 +141,9 @@ function holdRudder(startHeading, rudder, seconds) {
   }
   return rows;
 }
-const ORDER_RIGHT = holdRudder(60, 35, 8);
-const ORDER_LEFT = holdRudder(100, -35, 8);
-const ORDER_HOLD = holdRudder(90.8, 0, 8);
+const ORDER_RIGHT = holdRudder(60, 35, 6);
+const ORDER_LEFT = holdRudder(100, -35, 6);
+const ORDER_HOLD = holdRudder(90.8, 0, 6);
 // scripted inputs for the "what does this block do with an error" screens (like the video's step graphs)
 function scripted(seconds, errorAt) {
   const rows = [];
@@ -248,7 +248,7 @@ const SCREENS = [
       text(P.job, 500, 450, 20, C("--say"), "center", false);
       text(P.ex, 500, 490, 22, C("--text"));
   } },
-  { title: "what the order means", cap: "sign = which way · size = how hard (Kp = 3.5)", dur: 8, draw(t) {
+  { title: "what the order means", cap: "sign = which way · size = how hard (Kp = 3.5)", dur: 6, draw(t) {
       const cols = [
         { trip: ORDER_RIGHT, err: "+30°", calc: "P = 3.5 × 30 = 105", out: "limit → +35°", say: "+ → turn RIGHT, hard", col: C("--goal") },
         { trip: ORDER_LEFT, err: "−10°", calc: "P = 3.5 × −10 = −35", out: "−35°", say: "− → turn LEFT, hard", col: C("--far") },
