@@ -18,6 +18,12 @@ h1{font-size:28px;margin:6px 0 4px}
 canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display:block}
 .cap{font-size:22px;color:var(--say);margin:14px 0 4px;text-align:center}
 .hint{color:var(--dim);font-size:13px}
+.calc{display:none;width:min(1000px,100%);margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 18px}
+.calc h3{margin:0 0 8px;font-size:18px}
+.calc label{display:flex;gap:12px;align-items:center;margin:6px 0;color:var(--say)}
+.calc input{flex:1}
+.calc .v{min-width:70px;font-weight:600;color:var(--text)}
+.calc pre{font:18px/1.7 "IBM Plex Mono",monospace;margin:8px 0}
 </style>
 </head>
 <body>
@@ -26,6 +32,13 @@ canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display
 <canvas id="cv" width="1000" height="520"></canvas>
 <div class="cap" id="cap"></div>
 <div class="hint">← → next screen · space = pause · it loops</div>
+<div class="calc" id="calc">
+  <h3>🧮 P calculator: drag the error and Kp</h3>
+  <label><span style="color:var(--err)">error</span><input type="range" id="cErr" min="-100" max="100" step="5" value="100"><span class="v" id="cErrV"></span></label>
+  <label><span style="color:var(--p)">Kp</span><input type="range" id="cKp" min="0" max="3" step="0.1" value="0.5"><span class="v" id="cKpV"></span></label>
+  <pre id="cOut"></pre>
+  <canvas id="cCv" width="960" height="110" style="width:100%;height:110px;background:#0a1624"></canvas>
+</div>
 
 <script>
 // ---------- the boat and a PID captain (same model as the lab) ----------
@@ -421,10 +434,15 @@ function show(i) {
   document.getElementById("title").textContent = (idx + 1) + " · " + SCREENS[idx].title;
   document.getElementById("cap").textContent = SCREENS[idx].cap;
   [...dots.children].forEach((d, k) => d.classList.toggle("on", k === idx));
+  // the calculator lives under the "P = Kp × error" screen only
+  let showCalc = "none";
+  if (SCREENS[idx].title === "P = Kp × error") { showCalc = "block"; }
+  document.getElementById("calc").style.display = showCalc;
 }
 document.getElementById("prev").onclick = () => show(idx - 1);
 document.getElementById("next").onclick = () => show(idx + 1);
 window.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") { return; }   // arrows on a slider move the slider, not the screen
   if (e.key === "ArrowRight") { show(idx + 1); }
   if (e.key === "ArrowLeft") { show(idx - 1); }
   if (e.key === " ") { e.preventDefault(); paused = !paused; if (paused) { pausedAt = performance.now(); } else { t0 += performance.now() - pausedAt; } }
@@ -447,6 +465,40 @@ function frame(now) {
     console.error(err);
   }
 }
+// ---------- the P calculator ----------
+function calcPaint() {
+  const error = parseFloat(document.getElementById("cErr").value);
+  const kp = parseFloat(document.getElementById("cKp").value);
+  const p = kp * error;
+  let rudder = p;
+  let note = "";
+  if (p > LIMIT) { rudder = LIMIT; note = "  ← above +35: the rudder stops at 35"; }
+  else if (p < -LIMIT) { rudder = -LIMIT; note = "  ← below −35: the rudder stops at −35"; }
+  let way = "straight";
+  if (rudder > 0) { way = "turn RIGHT"; }
+  if (rudder < 0) { way = "turn LEFT"; }
+  document.getElementById("cErrV").textContent = error + "°";
+  document.getElementById("cKpV").textContent = kp.toFixed(1);
+  document.getElementById("cOut").innerHTML =
+    `<span style="color:var(--p)">P</span> = Kp × error = ${kp.toFixed(1)} × ${error} = <b style="color:var(--p)">${fmt(p)}</b>${note}\n` +
+    `<span style="color:var(--rud)">rudder</span> = <b style="color:var(--rud)">${fmt(rudder)}°</b> → ${way}`;
+  // the rudder ruler: −35 … +35, the P order (may be outside) and the real rudder
+  const cv = document.getElementById("cCv"), c = cv.getContext("2d"), r = window.devicePixelRatio || 1;
+  cv.width = 960 * r; cv.height = 110 * r; c.setTransform(r, 0, 0, r, 0, 0);
+  const X = v => 480 + v / 110 * 440;
+  c.fillStyle = "rgba(239,95,107,.15)"; c.fillRect(X(-110), 30, X(-35) - X(-110), 40); c.fillRect(X(35), 30, X(110) - X(35), 40);
+  c.strokeStyle = "#8aa3b5"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(-110), 70); c.lineTo(X(110), 70); c.stroke();
+  c.font = "12px IBM Plex Mono"; c.fillStyle = "#8aa3b5"; c.textAlign = "center";
+  for (const v of [-100, -35, 0, 35, 100]) { c.beginPath(); c.moveTo(X(v), 66); c.lineTo(X(v), 74); c.stroke(); c.fillText(v + "°", X(v), 90); }
+  c.fillStyle = "#ef5f6b"; c.fillText("too far: not possible", X(-72), 24); c.fillText("too far: not possible", X(72), 24);
+  c.fillStyle = "#8f7cff"; c.beginPath(); c.arc(X(Math.max(-110, Math.min(110, p))), 50, 9, 0, 7); c.fill();
+  c.fillText("P", X(Math.max(-110, Math.min(110, p))), 18 + 0);
+  c.fillStyle = "#c792ea"; c.fillRect(X(rudder) - 3, 34, 6, 32);
+  c.fillText("rudder", X(rudder), 106);
+}
+document.getElementById("cErr").addEventListener("input", calcPaint);
+document.getElementById("cKp").addEventListener("input", calcPaint);
+calcPaint();
 show(0);
 requestAnimationFrame(frame);
 </script>
