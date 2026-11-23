@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boat Basics</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1b2a;--panel:#112236;--line:#1e4060;--text:#d4e8f7;--say:#a8c2d4;--dim:#8aa3b5;
+  --boat:#f2f2f2;--goal:#7fd77f;--togo:#f4a261;--far:#ef5f6b;--turn:#4fd1c5;--rud:#c792ea}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px "IBM Plex Mono",monospace;display:flex;flex-direction:column;align-items:center;padding:16px}
+.top{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--line);cursor:pointer}
+.dot.on{background:var(--text)}
+button{font:inherit;background:var(--line);color:var(--text);border:0;border-radius:8px;padding:6px 14px;cursor:pointer}
+h1{font-size:30px;margin:6px 0 4px}
+canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display:block}
+.cap{font-size:22px;color:var(--say);margin:14px 0 4px;text-align:center}
+.hint{color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<div class="top"><button id="prev">←</button><div id="dots" style="display:flex;gap:8px"></div><button id="next">→</button></div>
+<h1 id="title"></h1>
+<canvas id="cv" width="1000" height="520"></canvas>
+<div class="cap" id="cap"></div>
+<div class="hint">← → next screen · space = pause · it loops</div>
+
+<script>
+// ---------- the boat model (same as the lab): rudder → the boat slowly starts swinging ----------
+const DT = 0.1, KB = 0.2, T = 3;
+function boatStep(s, rudder) {
+  const turn = s.turn + DT * ((KB * rudder - s.turn) / T);
+  return { heading: s.heading + DT * turn, turn };
+}
+// a whole trip: rudderAt(state, time) decides the rudder every 0.1 s
+function trip(seconds, rudderAt) {
+  let s = { heading: 0, turn: 0 };
+  const out = [];
+  for (let n = 0; n <= seconds / DT; n++) {
+    const t = n * DT;
+    const rudder = rudderAt(s, t);
+    out.push({ t, heading: s.heading, turn: s.turn, rudder });
+    s = boatStep(s, rudder);
+  }
+  return out;
+}
+
+// ---------- drawing helpers ----------
+const cv = document.getElementById("cv"), g = cv.getContext("2d");
+const C = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ang = d => (d - 90) * Math.PI / 180;            // 0° = up, 90° = right
+function text(s, x, y, size, col, align = "center", bold = true) {
+  g.font = (bold ? "600 " : "") + size + "px IBM Plex Mono"; g.fillStyle = col; g.textAlign = align; g.fillText(s, x, y);
+}
+function ring(cx, cy, R) {
+  g.strokeStyle = C("--line"); g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+  for (const d of [0, 90, 180, 270]) { text(d + "°", cx + Math.cos(ang(d)) * (R + 20), cy + Math.sin(ang(d)) * (R + 20) + 5, 13, C("--dim"), "center", false); }
+}
+function goalLine(cx, cy, R, d) {
+  g.setLineDash([8, 6]); g.strokeStyle = C("--goal"); g.lineWidth = 3;
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(ang(d)) * R, cy + Math.sin(ang(d)) * R); g.stroke(); g.setLineDash([]);
+}
+function gapArc(cx, cy, r, from, to, col) {            // the coloured arc between nose and goal
+  if (Math.abs(to - from) < 0.5) { return; }
+  g.strokeStyle = col; g.lineWidth = 10; g.lineCap = "butt";
+  g.beginPath(); g.arc(cx, cy, r, ang(Math.min(from, to)), ang(Math.max(from, to))); g.stroke();
+}
+function boat(cx, cy, R, heading, rudder, col) {
+  g.save(); g.translate(cx, cy); g.rotate(heading * Math.PI / 180);
+  const L = R * 0.85, B = R * 0.24;
+  g.fillStyle = col || C("--boat");
+  g.beginPath(); g.moveTo(0, -L / 2); g.quadraticCurveTo(B, -L / 6, B * 0.8, L / 2); g.lineTo(-B * 0.8, L / 2); g.quadraticCurveTo(-B, -L / 6, 0, -L / 2); g.fill();
+  g.fillStyle = C("--bg"); g.beginPath(); g.arc(0, -L / 2 + 10, 4, 0, 7); g.fill();   // the nose dot
+  if (rudder !== undefined) {
+    g.translate(0, L / 2); g.rotate(-rudder * Math.PI / 180);
+    g.strokeStyle = C("--rud"); g.lineWidth = 7; g.lineCap = "round";
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(0, L * 0.3); g.stroke();
+  }
+  g.restore();
+}
+function turnArrow(cx, cy, r, heading, turn) {          // curved arrow at the nose: longer = swinging faster
+  if (Math.abs(turn) < 0.05) { return; }
+  const span = Math.max(-80, Math.min(80, turn * 11));
+  const a0 = ang(heading), a1 = ang(heading + span);
+  g.strokeStyle = C("--turn"); g.lineWidth = 5; g.lineCap = "round";
+  g.beginPath(); g.arc(cx, cy, r, Math.min(a0, a1), Math.max(a0, a1)); g.stroke();
+  const tip = a1, dir = span > 0 ? 1 : -1;
+  const tx = cx + Math.cos(tip) * r, ty = cy + Math.sin(tip) * r;
+  const along = tip + dir * Math.PI / 2;
+  g.fillStyle = C("--turn"); g.beginPath();
+  g.moveTo(tx + Math.cos(along) * 12, ty + Math.sin(along) * 12);
+  g.lineTo(tx + Math.cos(tip) * 9, ty + Math.sin(tip) * 9);
+  g.lineTo(tx - Math.cos(tip) * 9, ty - Math.sin(tip) * 9); g.fill();
+}
+function miniGraph(x, y, w, h, rows, key, tNow, tMax, vMax, col, label, marks) {
+  g.strokeStyle = C("--line"); g.lineWidth = 1; g.strokeRect(x, y, w, h);
+  text(label, x + 8, y + 18, 14, col, "left");
+  const X = t => x + t / tMax * w, Y = v => y + h - v / vMax * (h - 26);
+  g.strokeStyle = col; g.lineWidth = 3; g.beginPath();
+  for (const p of rows) { if (p.t > tNow) { break; } if (p.t === 0) { g.moveTo(X(p.t), Y(p[key])); } else { g.lineTo(X(p.t), Y(p[key])); } }
+  g.stroke();
+  for (const m of (marks || [])) {
+    if (tNow < m.t) { continue; }
+    g.fillStyle = col; g.beginPath(); g.arc(X(m.t), Y(m.v), 6, 0, 7); g.fill();
+    text(m.label, X(m.t) + 10, Y(m.v) - 8, 14, C("--text"), "left");
+  }
+}
+const at = (rows, t) => rows[Math.min(rows.length - 1, Math.floor(t / DT))];
+const fmt = x => (Math.round(x * 10) / 10).toFixed(1);
+
+// ---------- the lessons ----------
+const RUDDER_TRIPS = [-20, 0, 20].map(r => trip(10, () => r));
+const LAG = trip(15, () => 20);
+// full rudder (35°) until the nose reaches the release line, then rudder 0 for good
+function releaseAt(line) {
+  let released = false;
+  return trip(26, s => {
+    if (s.heading >= line) { released = true; }
+    if (released) { return 0; }
+    return 35;
+  });
+}
+const LATE = releaseAt(90);    // rudder back AT the line
+const EARLY = releaseAt(70);   // rudder back BEFORE the line
+const LESSONS = [
+  { title: "heading", cap: "heading = where the nose points", dur: 12, draw(t) {
+      const h = (t / 12) * 360;
+      ring(330, 260, 190); boat(330, 260, 190, h);
+      g.strokeStyle = C("--boat"); g.lineWidth = 2; g.setLineDash([4, 6]);
+      g.beginPath(); g.moveTo(330, 260); g.lineTo(330 + Math.cos(ang(h)) * 190, 260 + Math.sin(ang(h)) * 190); g.stroke(); g.setLineDash([]);
+      text("heading", 760, 220, 22, C("--dim")); text(Math.round(h) + "°", 760, 290, 64, C("--boat"));
+  } },
+  { title: "goal", cap: "goal: put the nose on the green line", dur: 8, draw(t) {
+      const h = t < 2 ? 0 : Math.min(90, (t - 2) / 4 * 90);
+      ring(330, 260, 190); goalLine(330, 260, 190, 90); gapArc(330, 260, 120, h, 90, C("--togo")); boat(330, 260, 190, h);
+      text("goal", 760, 170, 20, C("--goal")); text("90°", 760, 215, 40, C("--goal"));
+      text("heading", 760, 290, 20, C("--dim")); text(Math.round(h) + "°", 760, 335, 40, C("--boat"));
+      const left = 90 - h;
+      if (left > 0.5) { text(Math.round(left) + "° to go", 760, 420, 30, C("--togo")); } else { text("✓ on the line", 760, 420, 30, C("--goal")); }
+  } },
+  { title: "where is the nose?", cap: "compare the nose with the green line", dur: 6, draw(t) {
+      const cases = [
+        { h: 20, word: "70° to go", act: "→ turn RIGHT", col: C("--togo") },
+        { h: 90, word: "0° ✓", act: "→ hold", col: C("--goal") },
+        { h: 125, word: "35° too far", act: "→ turn LEFT", col: C("--far") },
+      ];
+      cases.forEach((c, i) => {
+        const cx = 170 + i * 330, cy = 225, R = 120;
+        ring(cx, cy, R); goalLine(cx, cy, R, 90); gapArc(cx, cy, 80, c.h, 90, c.col); boat(cx, cy, R, c.h);
+        text("heading " + c.h + "°", cx, 405, 18, C("--boat"));
+        text(c.word, cx, 440, 22, c.col); text(c.act, cx, 475, 22, c.col);
+      });
+  } },
+  { title: "rudder", cap: "the rudder (purple) swings the nose", dur: 10, draw(t) {
+      ["−20°", "0°", "+20°"].forEach((label, i) => {
+        const p = at(RUDDER_TRIPS[i], t), cx = 170 + i * 330, cy = 225, R = 120;
+        ring(cx, cy, R); boat(cx, cy, R, p.heading, p.rudder); turnArrow(cx, cy, R * 0.62, p.heading, p.turn);
+        text("rudder " + label, cx, 405, 20, C("--rud"));
+        text("heading " + fmt(p.heading) + "°", cx, 440, 18, C("--boat"));
+        const where = i === 0 ? "nose goes LEFT" : (i === 1 ? "straight" : "nose goes RIGHT");
+        text(where, cx, 475, 18, C("--say"), "center", false);
+      });
+  } },
+  { title: "turn", cap: "turn = how many degrees the nose swings per second", dur: 12, draw(t) {
+      [1, 5].forEach((rate, i) => {
+        const cx = 250 + i * 500, cy = 230, R = 150, h = rate * t;
+        ring(cx, cy, R); boat(cx, cy, R, h); turnArrow(cx, cy, R * 0.62, h, rate);
+        text("turn " + rate + "°/s", cx, 440, 26, C("--turn"));
+        text("heading " + fmt(h) + "°", cx, 475, 18, C("--boat"));
+      });
+      text("after " + fmt(t) + " s", 500, 40, 18, C("--dim"));
+  } },
+  { title: "rudder now, turn later", cap: "the boat needs time to start swinging", dur: 15, draw(t) {
+      const p = at(LAG, t);
+      ring(200, 260, 150); boat(200, 260, 150, p.heading, p.rudder); turnArrow(200, 260, 93, p.heading, p.turn);
+      text("rudder " + p.rudder + "°", 200, 470, 18, C("--rud"));
+      miniGraph(420, 40, 540, 190, LAG, "rudder", t, 15, 25, C("--rud"), "rudder: 20° at once", []);
+      miniGraph(420, 270, 540, 210, LAG, "turn", t, 15, 4.5, C("--turn"), "turn (°/s)",
+        [{ t: 3, v: LAG[30].turn, label: "after 3 s: " + fmt(LAG[30].turn) + "°/s" }, { t: 14.9, v: LAG[149].turn, label: fmt(LAG[149].turn) + "°/s" }]);
+  } },
+  { title: "the trap", cap: "rudder back to 0 AT the line → too late", dur: 26, speed: 2, draw(t) {
+      const p = at(LATE, t), cx = 330, cy = 260, R = 190;
+      ring(cx, cy, R); goalLine(cx, cy, R, 90);
+      if (p.heading > 90) { gapArc(cx, cy, 120, 90, p.heading, C("--far")); } else { gapArc(cx, cy, 120, p.heading, 90, C("--togo")); }
+      boat(cx, cy, R, p.heading, p.rudder); turnArrow(cx, cy, R * 0.62, p.heading, p.turn);
+      text("heading " + fmt(p.heading) + "°", 760, 150, 26, C("--boat"));
+      text("rudder " + p.rudder + "°", 760, 200, 24, C("--rud"));
+      text("turn " + fmt(p.turn) + "°/s", 760, 250, 24, C("--turn"));
+      if (p.heading > 90.5) { text(fmt(p.heading - 90) + "° too far", 760, 340, 32, C("--far")); }
+      const max = Math.max(...LATE.map(r => r.heading));
+      if (t > 22) { text("stopped at " + fmt(max) + "°", 760, 400, 22, C("--far")); }
+  } },
+  { title: "brake early", cap: "rudder back BEFORE the line → stops on it", dur: 26, speed: 2, draw(t) {
+      const p = at(EARLY, t), cx = 330, cy = 260, R = 190;
+      ring(cx, cy, R); goalLine(cx, cy, R, 90);
+      g.strokeStyle = C("--rud"); g.lineWidth = 2; g.setLineDash([3, 5]);
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(ang(70)) * R, cy + Math.sin(ang(70)) * R); g.stroke(); g.setLineDash([]);
+      text("70°", cx + Math.cos(ang(66)) * (R + 24), cy + Math.sin(ang(66)) * (R + 24), 15, C("--rud"));
+      if (p.heading > 90) { gapArc(cx, cy, 120, 90, p.heading, C("--far")); } else { gapArc(cx, cy, 120, p.heading, 90, C("--togo")); }
+      boat(cx, cy, R, p.heading, p.rudder); turnArrow(cx, cy, R * 0.62, p.heading, p.turn);
+      text("heading " + fmt(p.heading) + "°", 760, 150, 26, C("--boat"));
+      text("rudder " + p.rudder + "°", 760, 200, 24, C("--rud"));
+      text("turn " + fmt(p.turn) + "°/s", 760, 250, 24, C("--turn"));
+      if (p.rudder === 0 && p.heading < 89.5) { text("rudder 0 at 70°", 760, 340, 24, C("--rud")); text("still swinging…", 760, 380, 20, C("--say"), "center", false); }
+      if (t > 22) { const max = Math.max(...EARLY.map(r => r.heading)); text("stopped at " + fmt(max) + "° ✓", 760, 400, 26, C("--goal")); }
+  } },
+];
+
+// ---------- player ----------
+let idx = 0, t0 = performance.now(), paused = false, pausedAt = 0;
+const dots = document.getElementById("dots");
+dots.innerHTML = LESSONS.map((_, i) => `<div class="dot" data-i="${i}"></div>`).join("");
+dots.onclick = e => { if (e.target.dataset.i) { show(+e.target.dataset.i); } };
+function show(i) {
+  idx = (i + LESSONS.length) % LESSONS.length; t0 = performance.now(); pausedAt = 0;
+  document.getElementById("title").textContent = (idx + 1) + " · " + LESSONS[idx].title;
+  document.getElementById("cap").textContent = LESSONS[idx].cap;
+  [...dots.children].forEach((d, k) => d.classList.toggle("on", k === idx));
+}
+document.getElementById("prev").onclick = () => show(idx - 1);
+document.getElementById("next").onclick = () => show(idx + 1);
+window.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { show(idx + 1); }
+  if (e.key === "ArrowLeft") { show(idx - 1); }
+  if (e.key === " ") { e.preventDefault(); paused = !paused; if (paused) { pausedAt = performance.now(); } else { t0 += performance.now() - pausedAt; } }
+});
+function fitCanvas() {
+  const r = window.devicePixelRatio || 1;
+  if (cv.width !== 1000 * r) { cv.width = 1000 * r; cv.height = 520 * r; }
+  g.setTransform(r, 0, 0, r, 0, 0);
+}
+function frame(now) {
+  fitCanvas();
+  const L = LESSONS[idx], speed = L.speed || 1;
+  const clock = paused ? pausedAt : now;
+  const loop = L.dur / speed + 2;                         // play, then hold the end 2 s, then loop
+  const real = ((clock - t0) / 1000) % loop;
+  const t = Math.min(L.dur, real * speed);
+  g.clearRect(0, 0, 1000, 520);
+  L.draw(t);
+  requestAnimationFrame(frame);
+}
+show(0);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
