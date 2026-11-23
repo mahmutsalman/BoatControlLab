@@ -130,6 +130,9 @@ const P_WIND_3 = pidTrip(3, 0, 0, -0.6, 50);
 const PI_WIND = pidTrip(1, 0.05, 0, -0.6, 50);
 const PD = pidTrip(3, 0, 6, 0, 30);
 const TUNED = pidTrip(3.5, 0.1, 6, -0.6, 40);
+const ONLY_P = pidTrip(3, 0, 0, 0, 40);
+const ONLY_I = pidTrip(0, 0.1, 0, 0, 40);
+const ONLY_D = pidTrip(0, 0, 6, 0, 40);
 // the "what the order means" boats: start somewhere, hold ONE rudder order, watch which way the nose goes
 function holdRudder(startHeading, rudder, seconds) {
   let heading = startHeading, turn = 0;
@@ -276,7 +279,15 @@ const SCREENS = [
   } },
   { title: "P alone on the boat", cap: "P alone: swings past the line, then settles (Kp = 3)", dur: 30, speed: 2, draw(t) {
       const r = at(P_ALONE, t), over = maxOf(P_ALONE, "heading") - GOAL;
-      boat(170, 260, 140, r.heading, r.rudder);
+      boat(170, 240, 125, r.heading, r.rudder);
+      // the P formula, live: error → P → the rudder the limit allows
+      text("error " + fmt(r.error) + "°", 170, 410, 18, C("--err"));
+      text("P = 3 × " + fmt(r.error) + " = " + fmt(r.p), 170, 440, 17, C("--p"));
+      let say = "rudder " + fmt(r.rudder) + "°";
+      if (Math.abs(r.p) > LIMIT) { say = "limit → rudder " + fmt(r.rudder) + "°"; }
+      text(say, 170, 470, 17, C("--rud"));
+      if (r.error < -0.3) { text("past the line → P < 0 → LEFT", 170, 500, 15, C("--far")); }
+      else if (Math.abs(r.error) < 3 && Math.abs(r.turn) > 1) { text("P ≈ 0, still turning " + fmt(r.turn) + "°/s", 170, 500, 15, C("--far")); }
       const gr = graph(400, 50, 540, 390, { tMax: 30, vMin: 0, vMax: 110, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP 90°" }], series: [{ rows: P_ALONE, value: x => x.heading, col: C("--boat") }] });
       if (t > 9) { pinkArrow(gr.X(10), gr.Y(90), gr.Y(90 + over), "+" + fmt(over) + "° too far"); }
   } },
@@ -334,6 +345,23 @@ const SCREENS = [
         text("P alone: +" + fmt(maxOf(P_ALONE, "heading") - 90) + "°", 860, 330, 18, C("--boat"));
         text("P + D: +" + fmt(maxOf(PD, "heading") - 90) + "°", 860, 365, 18, C("--d"));
       }
+  } },
+  { title: "each one ALONE", cap: "P alone works · I alone swings wildly · D alone never moves", dur: 40, speed: 2.5, draw(t) {
+      const cases = [
+        { rows: ONLY_P, name: "only P (Kp 3)", col: C("--p"), part: "p" },
+        { rows: ONLY_I, name: "only I (Ki 0.1)", col: C("--i"), part: "i" },
+        { rows: ONLY_D, name: "only D (Kd 6)", col: C("--d"), part: "d" },
+      ];
+      cases.forEach((c, n) => {
+        const r = at(c.rows, t), cy = 85 + n * 165;
+        boat(90, cy, 62, r.heading, r.rudder, c.col);
+        text(c.name, 250, cy - 20, 16, c.col);
+        text("heading " + fmt(r.heading) + "°", 250, cy + 8, 15, C("--boat"), "center", false);
+        text(c.part.toUpperCase() + " = " + fmt(r[c.part]), 250, cy + 34, 15, c.col, "center", false);
+      });
+      graph(420, 40, 530, 420, { tMax: 40, vMin: 0, vMax: 170, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP 90°" }],
+        series: cases.map(c => ({ rows: c.rows, value: x => x.heading, col: c.col })) });
+      if (t > 3) { text("D: the boat isn't turning → D = 0 → nothing happens", 685, 500, 14, C("--d")); }
   } },
   { title: "tuning: all three", cap: "tuning = picking Kp, Ki, Kd until the curve looks like this", dur: 40, speed: 2.5, draw(t) {
       const r = at(TUNED, t);
