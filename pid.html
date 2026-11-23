@@ -130,6 +130,9 @@ const P_WIND_3 = pidTrip(3, 0, 0, -0.6, 50);
 const PI_WIND = pidTrip(1, 0.05, 0, -0.6, 50);
 const PD = pidTrip(3, 0, 6, 0, 30);
 const TUNED = pidTrip(3.5, 0.1, 6, -0.6, 40);
+const SIDE_0 = pidTrip(3, 0, 0, 0, 36);
+const SIDE_6 = pidTrip(3, 0, 6, 0, 36);
+const SIDE_10 = pidTrip(3, 0, 10, 0, 36);
 const ONLY_P = pidTrip(3, 0, 0, 0, 40);
 const ONLY_I = pidTrip(0, 0.1, 0, 0, 40);
 const ONLY_D = pidTrip(0, 0, 6, 0, 40);
@@ -358,6 +361,27 @@ const SCREENS = [
         text("P alone: +" + fmt(maxOf(P_ALONE, "heading") - 90) + "°", 860, 330, 18, C("--boat"));
         text("P + D: +" + fmt(maxOf(PD, "heading") - 90) + "°", 860, 365, 18, C("--d"));
       }
+  } },
+  { title: "arrive from ONE side (like a limit)", cap: "more brake (Kd) → never passes 90°, but arrives later", dur: 36, speed: 2.5, draw(t) {
+      const cases = [
+        { rows: SIDE_0, name: "Kd 0", col: C("--far") },
+        { rows: SIDE_6, name: "Kd 6", col: C("--d") },
+        { rows: SIDE_10, name: "Kd 10", col: C("--goal") },
+      ];
+      cases.forEach((c, n) => {
+        const r = at(c.rows, t), cy = 85 + n * 165;
+        boat(90, cy, 62, r.heading, r.rudder, c.col);
+        text("Kp 3 · " + c.name, 250, cy - 20, 16, c.col);
+        text("heading " + r.heading.toFixed(2) + "°", 250, cy + 8, 15, C("--boat"), "center", false);
+        const top = maxOf(c.rows.filter(x => x.t <= t), "heading");
+        let say = "highest " + top.toFixed(2) + "°";
+        text(say, 250, cy + 34, 14, top > 90.05 ? C("--far") : C("--say"), "center", false);
+      });
+      // zoomed in near the goal: 70° … 100°, so the last few degrees are big
+      const gr = graph(430, 40, 520, 410, { tMax: 36, vMin: 70, vMax: 100, now: t, label: "heading (zoomed: 70°–100°)",
+        lines: [{ v: 90, col: C("--goal"), label: "90°" }, { v: 80, col: "rgba(138,163,181,.35)", label: "80°" }],
+        series: cases.map(c => ({ rows: c.rows, value: x => x.heading, col: c.col })) });
+      if (t > 20) { text("Kd 10: 84.4 → 88.1 → 89.8 → … never above 90", 690, 500, 14, C("--goal")); }
   } },
   { title: "each one ALONE", cap: "P alone works · I alone swings wildly · D alone never moves", dur: 40, speed: 2.5, draw(t) {
       const cases = [
