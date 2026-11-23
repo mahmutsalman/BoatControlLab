@@ -6,7 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const html = fs.readFileSync(path.join(here, "..", "index.html"), "utf8");
+const html = fs.readFileSync(path.join(here, "..", "lab.html"), "utf8");
 const sim = html.match(/<script id="sim">([\s\S]*?)<\/script>/)[1];
 const ctx = {};
 vm.createContext(ctx);

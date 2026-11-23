@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three Captains</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0d1b2a; --panel:#112236; --line:#1e4060; --text:#d4e8f7; --say:#a8c2d4; --dim:#8aa3b5; --faint:#4c7590;
+  --pid:#f4a261; --lqr:#c792ea; --mpc:#4fd1c5; --you:#f2f2f2; --bad:#ef5f6b; --target:#7fd77f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "IBM Plex Mono",monospace;padding:16px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--say);margin:0 0 14px}
+.bar{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:end;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.knob{display:flex;flex-direction:column;gap:2px;min-width:170px}
+.knob label{color:var(--dim);font-size:12px}
+.knob .val{color:var(--text);font-weight:600}
+.knob .why{color:var(--say);font-size:12px;max-width:220px}
+input[type=range]{width:170px;accent-color:var(--dim)}
+button{font:inherit;background:var(--line);color:var(--text);border:0;border-radius:8px;padding:7px 14px;cursor:pointer}
+button:hover{background:#2a5580}
+.sc{display:flex;gap:6px;flex-wrap:wrap}
+.sc button.on{outline:2px solid var(--target)}
+.check{color:var(--say);font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+@media (max-width:1000px){.grid{grid-template-columns:1fr}}
+.cap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;border-top:4px solid var(--c)}
+.cap h2{margin:0;font-size:17px;color:var(--c)}
+.cap .tag{color:var(--say);font-size:12.5px;margin:2px 0 8px}
+.cap canvas{width:100%;display:block}
+pre.f{margin:8px 0;background:#0a1624;border-radius:8px;padding:8px 10px;white-space:pre-wrap;font:13px/1.55 "IBM Plex Mono",monospace;min-height:160px}
+.f .t{color:var(--dim)} .f .k{color:var(--c);font-weight:600} .f .out{color:var(--target);font-weight:600} .f .bad{color:var(--bad);font-weight:600}
+.pros{font-size:12.5px;margin:6px 0 0;padding:0;list-style:none}
+.pros li{margin:2px 0}
+.cap .knobs{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:6px}
+details.vars{margin-top:8px;font-size:12.5px;color:var(--say)}
+details.vars summary{cursor:pointer;color:var(--text)}
+details.vars table{border-collapse:collapse;margin-top:6px;width:100%}
+details.vars td{padding:3px 6px;vertical-align:top;border-bottom:1px solid var(--line)}
+details.vars td:first-child{color:var(--c);white-space:nowrap;font-weight:600}
+.plots{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:14px}
+.plots canvas{width:100%;display:block;margin-bottom:6px}
+.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--say);font-size:12.5px;margin:4px 0 8px}
+.legend i{display:inline-block;width:18px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}
+table.v{width:100%;border-collapse:collapse;margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+table.v th,table.v td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+table.v th{color:var(--dim);font-weight:400}
+.good{color:var(--target)} .warn{color:var(--bad)}
+.story{color:var(--say);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:14px}
+.story b{color:var(--text)}
+.boat{color:var(--say);font-size:13px;width:100%}
+.boat b{color:var(--text)}
+.keys{display:inline-block;border:1px solid var(--dim);border-radius:5px;padding:0 6px;color:var(--text)}
+</style>
+</head>
+<body>
+<h1>⛵ Three captains and YOU, one order: “turn from 0° to <span id="tgtTxt">90</span>°”</h1>
+<p class="sub">Same boat, same rudder (dümen) limit. Every 0.1 s each captain decides the rudder. You steer the white boat with <span class="keys">←</span> <span class="keys">→</span> (hold), <span class="keys">space</span> = rudder to 0.</p>
+
+<div class="bar">
+  <div class="sc" id="scenes"></div>
+  <button id="restart">↻ restart</button>
+  <button id="pause">⏸ pause</button>
+  <div class="knob"><label>speed</label><input type="range" id="speed" min="0.25" max="4" step="0.25" value="1"><span class="val" id="speedV"></span></div>
+</div>
+<div class="story" id="story"></div>
+
+<div class="bar" id="world">
+  <div class="boat">🚤 <b>The boat (the MODEL):</b> rudder 10° → the boat WANTS to turn <b>Kb × 10 = 2°/s</b> (Kb = 0.2). It doesn't get there at once:
+  after <b>T = 3 s</b> it has reached about 2/3 of it. In code, every 0.1 s:
+  <span style="color:var(--text)">turn += 0.1 × ((Kb × rudder − turn) / T + wind)</span> · <span style="color:var(--text)">heading += 0.1 × turn</span></div>
+</div>
+
+<div class="grid">
+  <div class="cap" style="--c:var(--you)">
+    <h2>🙋 YOU</h2>
+    <div class="tag">your hands on the rudder. Hold ← → . Below: what the formulas would do in YOUR spot right now.</div>
+    <canvas id="cv-you" height="250"></canvas>
+    <pre class="f" id="f-you"></pre>
+    <ul class="pros"><li>💡 Try: full rudder until about 60°, then centre it. You are doing what D and LQR's kTurn do: braking on the turn speed.</li></ul>
+  </div>
+  <div class="cap" style="--c:var(--pid)">
+    <h2>🧑‍✈️ PID</h2>
+    <div class="tag">looks only at the ERROR. Knows nothing about the boat.</div>
+    <canvas id="cv-pid" height="250"></canvas>
+    <pre class="f" id="f-pid"></pre>
+    <div class="knobs" id="k-pid"></div>
+    <label class="check"><input type="checkbox" id="aw"> anti-windup: stop adding to the sum while the rudder is at the limit</label>
+    <ul class="pros"><li>✅ no model needed · 3 multiplications · the I part kills a steady push (wind)</li><li>🔴 doesn't know the limit: the sum keeps growing while the rudder is stuck at 35° (“windup”) → big overshoot</li></ul>
+    <details class="vars" open><summary>every variable</summary><table>
+      <tr><td>error</td><td>target − heading, in °. How far the bow still has to swing. Positive = turn right more.</td></tr>
+      <tr><td>P = Kp × error</td><td>push NOW, in proportion to how far away you are. Big Kp = strong pull.</td></tr>
+      <tr><td>sum</td><td>error added up every 0.1 s (unit °·s). The MEMORY: it grows while you stay short of the target.</td></tr>
+      <tr><td>I = Ki × sum</td><td>push from error that STAYS. This is what beats a steady wind. Also what overshoots (windup).</td></tr>
+      <tr><td>turn</td><td>how fast the bow swings now, °/s. The error shrinks exactly that fast, so “change of error” = −turn.</td></tr>
+      <tr><td>D = Kd × (−turn)</td><td>the BRAKE: the faster you already swing toward the target, the more it pulls the rudder back.</td></tr>
+      <tr><td>wants → rudder</td><td>P + I + D can be any number; the real rudder stops at ±limit (“saturation”).</td></tr>
+    </table></details>
+  </div>
+  <div class="cap" style="--c:var(--lqr)">
+    <h2>📐 LQR</h2>
+    <div class="tag">knows the boat's equations. Computed its 2 gains ONCE, before the trip.</div>
+    <canvas id="cv-lqr" height="250"></canvas>
+    <pre class="f" id="f-lqr"></pre>
+    <ul class="pros"><li>✅ as cheap as PID while sailing · the gains come from the model + what you say you hate (qe, qr, R)</li><li>🔴 rules (limit, 4°/s) are not in its math · no sum, so a steady wind leaves an error · wrong model → wrong gains</li></ul>
+    <details class="vars" open><summary>every variable</summary><table>
+      <tr><td>state</td><td>the 2 numbers that describe the boat right now: error and turn. LQR needs BOTH (PID's P and D used the same two).</td></tr>
+      <tr><td>kErr</td><td>like Kp: rudder degrees per 1° of error. Not hand-tuned: COMPUTED.</td></tr>
+      <tr><td>kTurn</td><td>like Kd: rudder degrees taken back per 1°/s of turning. Also computed.</td></tr>
+      <tr><td>qe, qr, R</td><td>the score it minimises over the WHOLE future: qe·error² + qr·turn² + R·rudder², added up. You tune these 3, not the gains.</td></tr>
+      <tr><td>Riccati</td><td>the repeated calculation that finds kErr and kTurn from the model + qe, qr, R. It runs until the numbers stop changing, once, before the trip.</td></tr>
+      <tr><td>Q (the “Q” in LQR)</td><td>Linear model · Quadratic score (the ²) · Regulator (holds a target).</td></tr>
+    </table></details>
+  </div>
+  <div class="cap" style="--c:var(--mpc)">
+    <h2>🔮 MPC</h2>
+    <div class="tag">has the model in its head and IMAGINES the next 8 s for many rudder plans.</div>
+    <canvas id="cv-mpc" height="250"></canvas>
+    <pre class="f" id="f-mpc"></pre>
+    <ul class="pros"><li>✅ rules are part of the choice (rudder ±limit, “never turn faster than 4°/s”) · sees what is coming</li><li>🔴 heavy: ~100 000 imagined boat steps every 0.5 s · only as good as its model (unknown wind → error)</li></ul>
+    <details class="vars" open><summary>every variable</summary><table>
+      <tr><td>plan</td><td>3 rudder values: A for 1 s, then B for 2 s, then C for 5 s = 8 s ahead (the “horizon”).</td></tr>
+      <tr><td>levels</td><td>each of A, B, C is one of 11 rudder values from −limit to +limit → 11³ = 1331 plans. The limit is built in: no plan can ask for 40°.</td></tr>
+      <tr><td>imagine</td><td>run the MODEL's boat equations 80 steps (8 s) for each plan. That is the “Model Predictive” part.</td></tr>
+      <tr><td>score</td><td>the same as LQR's: Σ (qe·error² + qr·turn² + R·rudder²) × 0.1 s, plus a big penalty if the boat is not calm at the end.</td></tr>
+      <tr><td>rule</td><td>a plan whose imagined turn goes past 4°/s is thrown out (red lines). A rule on the STATE: PID and LQR have no place for it.</td></tr>
+      <tr><td>first step only</td><td>use A for just 0.5 s, then imagine everything again from where the boat really is (“receding horizon”). This fixes small model errors.</td></tr>
+    </table></details>
+  </div>
+</div>
+
+<div class="bar" style="margin-top:14px" id="scoreKnobs"></div>
+
+<div class="plots">
+  <div class="legend"><span><i style="background:var(--you)"></i>YOU</span><span><i style="background:var(--pid)"></i>PID</span><span><i style="background:var(--lqr)"></i>LQR</span><span><i style="background:var(--mpc)"></i>MPC</span><span><i style="background:var(--target)"></i>target</span><span><i style="background:var(--bad)"></i>limit / rule</span></div>
+  <canvas id="plotH" height="220"></canvas>
+  <canvas id="plotR" height="160"></canvas>
+  <canvas id="plotU" height="160"></canvas>
+</div>
+
+<table class="v" id="verdict"></table>
+
+<!-- ============ THE SIMULATION (pure functions; runs in node too) ============ -->
+<script id="sim">
+const DT = 0.1;                 // one decision tick = 0.1 s
+const HORIZON_S = 40;           // how long one run lasts
+
+// The boat ("Nomoto" model): the rudder sets how fast the boat WANTS to turn; it gets there slowly (T seconds).
+function boatStep(state, rudder, boat) {
+  const turnAccel = (boat.Kb * rudder - state.turn) / boat.T + boat.wind;
+  const turn = state.turn + DT * turnAccel;
+  const heading = state.heading + DT * turn;
+  return { heading, turn };
+}
+function clip(x, limit) {
+  if (x > limit) { return limit; }
+  if (x < -limit) { return -limit; }
+  return x;
+}
+
+// ---------- PID: rudder = Kp*error + Ki*(sum of error) + Kd*(change of error) ----------
+function pidDecide(state, mem, g, target, limit, antiWindup) {
+  const error = target - state.heading;
+  const d = g.Kd * (-state.turn);                    // error changes at minus the turn speed
+  const wantsIfAdded = g.Kp * error + g.Ki * (mem.sum + error * DT) + d;
+  let frozen = false;
+  if (antiWindup && Math.abs(wantsIfAdded) >= limit) {
+    frozen = true;                                   // the rudder is stuck at the limit: adding more would only pile up
+  } else {
+    mem.sum += error * DT;
+  }
+  const p = g.Kp * error;
+  const i = g.Ki * mem.sum;
+  const wants = p + i + d;
+  return { rudder: clip(wants, limit), wants, error, p, i, d, sum: mem.sum, frozen };
+}
+
+// ---------- LQR: before the trip, solve the "Riccati" equation for the best 2 gains ----------
+// state = [error, turn]; score = sum of qe*error^2 + qr*turn^2 + R*rudder^2
+function lqrGains(model, qe, qr, R) {
+  const a12 = DT, a22 = 1 - DT / model.T, b2 = DT * model.Kb / model.T;
+  let P00 = qe, P01 = 0, P11 = qr, k0 = 0, k1 = 0, steps = 0;
+  for (let n = 0; n < 5000; n++) {
+    steps++;
+    const PB0 = P01 * b2, PB1 = P11 * b2;
+    const s = R + b2 * PB1;
+    const nk0 = PB0 / s;
+    const nk1 = (PB0 * a12 + PB1 * a22) / s;
+    const APA00 = P00;
+    const APA01 = P00 * a12 + P01 * a22;
+    const APA11 = a12 * (P00 * a12 + P01 * a22) + a22 * (P01 * a12 + P11 * a22);
+    const n00 = qe + APA00 - s * nk0 * nk0;
+    const n01 = APA01 - s * nk0 * nk1;
+    const n11 = qr + APA11 - s * nk1 * nk1;
+    const moved = Math.abs(n00 - P00) + Math.abs(n11 - P11);
+    P00 = n00; P01 = n01; P11 = n11; k0 = nk0; k1 = nk1;
+    if (moved < 1e-9 * (1 + Math.abs(P00))) { break; }
+  }
+  return { kErr: k0, kTurn: k1, steps };
+}
+function lqrDecide(state, gains, target, limit) {
+  const error = target - state.heading;
+  const fromError = gains.kErr * error;
+  const fromTurn = gains.kTurn * state.turn;
+  const wants = fromError - fromTurn;
+  return { rudder: clip(wants, limit), wants, error, fromError, fromTurn };
+}
+
+// ---------- MPC: imagine many plans with the model, keep the best one that breaks no rule, use its first step ----------
+const MPC_LEVELS = 11, MPC_SEG = [10, 20, 50], MPC_REPLAN = 5;   // plan = A 1 s, B 2 s, C 5 s; replan every 0.5 s
+function mpcPlan(state, model, target, limit, w, turnCap) {
+  const levels = [];
+  for (let n = 0; n < MPC_LEVELS; n++) { levels.push(-limit + 2 * limit * n / (MPC_LEVELS - 1)); }
+  let best = null, simulated = 0, nBroke = 0;
+  const bestPerFirst = new Map();          // for the drawing: the best plan for each first move A
+  for (const a of levels) for (const b of levels) for (const c of levels) {
+    let s = { heading: state.heading, turn: state.turn }, cost = 0, over = 0;
+    const path = [s.heading];
+    const plan = [a, b, c];
+    let k = 0;
+    for (let seg = 0; seg < 3; seg++) {
+      for (let n = 0; n < MPC_SEG[seg]; n++) {
+        s = boatStep(s, plan[seg], model);
+        simulated++; k++;
+        const e = target - s.heading;
+        cost += (w.qe * e * e + w.qr * s.turn * s.turn + w.R * plan[seg] * plan[seg]) * DT;
+        if (turnCap !== null && Math.abs(s.turn) > turnCap) { over = Math.max(over, Math.abs(s.turn) - turnCap); }
+        if (k % 4 === 0) { path.push(s.heading); }
+      }
+    }
+    const eEnd = target - s.heading;
+    cost += 20 * w.qe * eEnd * eEnd + 20 * w.qr * s.turn * s.turn;   // "and be calm at the end"
+    const cand = { plan, cost, over, broke: over > 1e-9, path };
+    if (cand.broke) { nBroke++; }
+    if (better(cand, best)) { best = cand; }
+    if (better(cand, bestPerFirst.get(a))) { bestPerFirst.set(a, cand); }
+  }
+  return { best, others: [...bestPerFirst.values()], simulated, nBroke, total: MPC_LEVELS ** 3 };
+}
+function better(x, y) {
+  if (!y) { return true; }
+  if (x.broke || y.broke) {
+    if (x.over !== y.over) { return x.over < y.over; }   // keeping the rule beats any score; if all break it, the least bad
+  }
+  return x.cost < y.cost;
+}
+
+// ---------- one whole run ----------
+function makeRun(cfg) {
+  const real = { Kb: cfg.Kb, T: cfg.T * (1 + cfg.mismatch), wind: cfg.wind };   // the REAL boat
+  const model = { Kb: cfg.Kb, T: cfg.T, wind: 0 };                            // what LQR and MPC believe
+  const turnCap = cfg.ruleOn ? cfg.turnCap : null;
+  const gains = lqrGains(model, cfg.qe, cfg.qr, cfg.R);
+  const zero = () => ({ heading: 0, turn: 0 });
+  return {
+    cfg, real, model, turnCap, gains, t: 0, tick: 0,
+    you: { s: zero(), cmd: 0, shadow: { sum: 0 }, hist: [], last: null },
+    pid: { s: zero(), mem: { sum: 0 }, hist: [], last: null },
+    lqr: { s: zero(), hist: [], last: null },
+    mpc: { s: zero(), hist: [], last: null, plan: null, planAge: 0 },
+  };
+}
+function stepRun(run) {
+  const c = run.cfg;
+  const d0 = { rudder: clip(run.you.cmd, c.limit) };
+  d0.pidHere = pidDecide(run.you.s, run.you.shadow, c, c.target, c.limit, c.antiWindup);
+  d0.lqrHere = lqrDecide(run.you.s, run.gains, c.target, c.limit);
+  const d1 = pidDecide(run.pid.s, run.pid.mem, c, c.target, c.limit, c.antiWindup);
+  const d2 = lqrDecide(run.lqr.s, run.gains, c.target, c.limit);
+  if (run.tick % MPC_REPLAN === 0) {
+    run.mpc.plan = mpcPlan(run.mpc.s, run.model, c.target, c.limit, { qe: c.qe, qr: c.qr, R: c.R }, run.turnCap);
+    run.mpc.planAge = 0;
+  }
+  const d3 = { rudder: run.mpc.plan.best.plan[0], plan: run.mpc.plan, age: run.mpc.planAge };
+  run.mpc.planAge++;
+  for (const [cap, d] of [[run.you, d0], [run.pid, d1], [run.lqr, d2], [run.mpc, d3]]) {
+    cap.last = d;
+    cap.s = boatStep(cap.s, d.rudder, run.real);
+    cap.hist.push({ t: run.t + DT, heading: cap.s.heading, turn: cap.s.turn, rudder: d.rudder });
+  }
+  run.t += DT; run.tick++;
+}
+function verdict(cap, cfg, turnCap) {
+  const h = cap.hist;
+  let max = -1e9, atLimit = 0, settle = null, maxTurn = 0;
+  for (const p of h) {
+    if (p.heading > max) { max = p.heading; }
+    if (Math.abs(p.turn) > maxTurn) { maxTurn = Math.abs(p.turn); }
+    if (Math.abs(Math.abs(p.rudder) - cfg.limit) < 1e-6) { atLimit += DT; }
+  }
+  for (let n = h.length - 1; n >= 0; n--) {
+    if (Math.abs(cfg.target - h[n].heading) > 2) { settle = n === h.length - 1 ? null : h[n + 1].t; break; }
+    if (n === 0) { settle = h[0].t; }
+  }
+  const tail = h.slice(-30);
+  const endErr = tail.reduce((a, p) => a + (cfg.target - p.heading), 0) / Math.max(1, tail.length);
+  return { overshoot: Math.max(0, max - cfg.target), settle, endErr, atLimit, maxTurn, brokeRule: turnCap !== null && maxTurn > turnCap + 1e-9 };
+}
+</script>
+
+<!-- ============ THE PAGE ============ -->
+<script>
+const SCENES = [
+  { id: "calm", name: "1 · calm sea", story: "<b>Plain case.</b> PID's rudder hits the red ±35° line and stays there while its SUM keeps growing (windup) → it swings far past 90°. Tick <b>anti-windup</b> under PID and restart: the overshoot is gone. LQR and MPC brake early because they also watch the turn speed.", set: { wind: 0, mismatch: 0, ruleOn: false, antiWindup: false } },
+  { id: "rule", name: "2 · cargo rule: max 4°/s", story: "<b>A rule on the boat's STATE:</b> never turn faster than 4°/s (the cargo would slide). Look at the middle graph. Only MPC keeps under the red line: every imagined plan that breaks the rule is thrown out. PID and LQR have no place to write such a rule; they would need hand-tuning until they happen to obey it. The price: MPC arrives later (at 40 s it is still ~2.5° short), because a slower turn IS what the rule asks.", set: { wind: 0, mismatch: 0, ruleOn: true, antiWindup: true } },
+  { id: "wind", name: "3 · steady wind", story: "<b>A push nobody modelled.</b> The wind keeps turning the bow left. PID's SUM grows until I cancels the wind → error 0. LQR and MPC have no sum and their model has no wind → they stop a few degrees short. (Real MPC fixes this by estimating the wind; that is extra work.)", set: { wind: -0.6, mismatch: 0, ruleOn: false, antiWindup: true } },
+  { id: "wrong", name: "4 · wrong model", story: "<b>The real boat reacts 2.5× slower than the model says</b> (T = 7.5 s, the model thinks 3 s). All three swing more than in scene 1. The difference is WHERE the fix lives: PID's gains are tuned by trying on the real boat, so you retune by hand. LQR's gains and MPC's imagination were COMPUTED from the model: a wrong model makes the math confidently wrong. Fix = measure the real boat first (“system identification”), then compute again.", set: { wind: 0, mismatch: 1.5, ruleOn: false, antiWindup: true } },
+];
+const CFG = { target: 90, limit: 35, Kb: 0.2, T: 3, wind: 0, mismatch: 0, ruleOn: false, turnCap: 4, antiWindup: false,
+              Kp: 3.5, Ki: 0.1, Kd: 6, qe: 1, qr: 4, R: 0.5 };
+let scene = "calm", run = null, paused = false, speed = 1;
+
+const KNOBS = {
+  world: [
+    ["target", "target heading", 30, 150, 5, "°", "where to point"],
+    ["limit", "rudder limit ±", 10, 45, 1, "°", "the dümen can't turn more than this"],
+    ["wind", "wind", -1.5, 1.5, 0.1, "°/s²", "a steady push on the bow (minus = to the left)"],
+    ["mismatch", "real boat slower by", 0, 2, 0.25, "", "the real T = model T × (1 + this)"],
+  ],
+  pid: [
+    ["Kp", "Kp", 0, 8, 0.25, "", "P: rudder ° per 1° of error NOW"],
+    ["Ki", "Ki", 0, 0.5, 0.01, "", "I: rudder ° per 1 °·s of summed error"],
+    ["Kd", "Kd", 0, 15, 0.5, "", "D: rudder ° taken back per 1°/s of turning"],
+  ],
+  score: [
+    ["qe", "qe · hate of ERROR", 0.1, 5, 0.1, "", "cost per (error)²"],
+    ["qr", "qr · hate of TURNING FAST", 0, 20, 0.5, "", "cost per (turn speed)²"],
+    ["R", "R · hate of using the RUDDER", 0.05, 5, 0.05, "", "cost per (rudder)²: big R = lazy, smooth"],
+  ],
+};
+function fmt(x, d = 1) { return (Math.round(x * 10 ** d) / 10 ** d).toFixed(d); }
+function knobHtml([key, label, min, max, step, unit, why]) {
+  return `<div class="knob"><label>${label}: <span class="val" id="v-${key}"></span></label>
+    <input type="range" id="r-${key}" min="${min}" max="${max}" step="${step}" value="${CFG[key]}"><span class="why">${why}</span></div>`;
+}
+function buildKnobs(boxId, list) {
+  const box = document.getElementById(boxId);
+  box.insertAdjacentHTML("beforeend", list.map(knobHtml).join(""));
+  for (const k of list) {
+    const el = document.getElementById("r-" + k[0]);
+    el.addEventListener("input", () => { CFG[k[0]] = parseFloat(el.value); restart(); });
+  }
+}
+function syncKnobs() {
+  for (const list of Object.values(KNOBS)) for (const k of list) {
+    document.getElementById("r-" + k[0]).value = CFG[k[0]];
+    let text = fmt(CFG[k[0]], k[4] < 0.1 ? 2 : 1) + k[5];
+    if (k[0] === "mismatch") { text = "×" + fmt(1 + CFG.mismatch, 2) + " (T = " + fmt(CFG.T * (1 + CFG.mismatch)) + " s)"; }
+    document.getElementById("v-" + k[0]).textContent = text;
+  }
+  document.getElementById("aw").checked = CFG.antiWindup;
+}
+buildKnobs("world", KNOBS.world);
+buildKnobs("k-pid", KNOBS.pid);
+document.getElementById("scoreKnobs").innerHTML = `<div style="color:var(--say);width:100%">📐🔮 <b style="color:var(--text)">The SCORE that LQR and MPC both make as small as possible</b> = Σ qe·error² + qr·turn² + R·rudder². These three numbers ARE their tuning: you say what you hate, the math finds the rudder.</div>`;
+buildKnobs("scoreKnobs", KNOBS.score);
+document.getElementById("aw").addEventListener("change", e => { CFG.antiWindup = e.target.checked; restart(); });
+
+document.getElementById("scenes").innerHTML = SCENES.map(s => `<button data-s="${s.id}">${s.name}</button>`).join("");
+document.getElementById("scenes").addEventListener("click", e => {
+  const id = e.target.dataset.s; if (!id) { return; }
+  scene = id; Object.assign(CFG, SCENES.find(s => s.id === id).set); restart();
+});
+document.getElementById("restart").onclick = restart;
+document.getElementById("pause").onclick = togglePause;
+function togglePause() { paused = !paused; document.getElementById("pause").textContent = paused ? "▶ play" : "⏸ pause"; }
+const speedEl = document.getElementById("speed");
+speedEl.oninput = () => { speed = parseFloat(speedEl.value); document.getElementById("speedV").textContent = speed + "×"; };
+speedEl.oninput();
+
+// ---------- your hands on the rudder ----------
+const held = { left: false, right: false };
+window.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === " ") {
+    if (document.activeElement && document.activeElement.tagName === "INPUT") { document.activeElement.blur(); }
+    e.preventDefault();
+  }
+  if (e.key === "ArrowLeft") { held.left = true; }
+  if (e.key === "ArrowRight") { held.right = true; }
+  if (e.key === " ") { run.you.cmd = 0; }
+});
+window.addEventListener("keyup", e => {
+  if (e.key === "ArrowLeft") { held.left = false; }
+  if (e.key === "ArrowRight") { held.right = false; }
+});
+const HAND_SPEED = 45;   // your rudder moves 45° per real second while you hold a key
+
+function restart() {
+  run = makeRun({ ...CFG });
+  syncKnobs();
+  document.getElementById("tgtTxt").textContent = CFG.target;
+  document.querySelectorAll("#scenes button").forEach(b => b.classList.toggle("on", b.dataset.s === scene));
+  document.getElementById("story").innerHTML = SCENES.find(s => s.id === scene).story;
+  stepRun(run);
+}
+
+// ---------- drawing ----------
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function fit(cv) {
+  const r = window.devicePixelRatio || 1, w = cv.clientWidth;
+  if (!cv._h) { cv._h = cv.height; }
+  if (cv.width !== Math.round(w * r)) { cv.width = Math.round(w * r); cv.height = Math.round(cv._h * r); }
+  const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0);
+  return { g, w, h: cv._h };
+}
+function atLimit(rud) { return Math.abs(Math.abs(rud) - run.cfg.limit) < 1e-6; }
+function compass(cv, cap, colour, extra) {
+  const { g, w, h } = fit(cv);
+  g.clearRect(0, 0, w, h);
+  const R = Math.min(w * 0.22, h * 0.4), cx = R + 24, cy = h / 2;
+  const ang = deg => (deg - 90) * Math.PI / 180;   // 0° = up (north), 90° = right (east)
+  g.strokeStyle = css("--line"); g.lineWidth = 1.5; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+  g.fillStyle = css("--dim"); g.font = "12px IBM Plex Mono"; g.textAlign = "center";
+  for (const d of [0, 90, 180, 270]) { g.fillText(d + "°", cx + Math.cos(ang(d)) * (R + 14), cy + Math.sin(ang(d)) * (R + 14) + 4); }
+  g.setLineDash([6, 5]); g.strokeStyle = css("--target"); g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(ang(run.cfg.target)) * R, cy + Math.sin(ang(run.cfg.target)) * R); g.stroke(); g.setLineDash([]);
+  if (run.cfg.wind !== 0) {
+    g.fillStyle = css("--say"); g.font = "12px IBM Plex Mono";
+    g.fillText(run.cfg.wind < 0 ? "↺ wind" : "↻ wind", cx, cy - R - 4 + 2 * R + 26);
+  }
+  const hd = cap.s.heading, rud = cap.last ? cap.last.rudder : 0;
+  g.save(); g.translate(cx, cy); g.rotate(hd * Math.PI / 180);
+  const L = R * 0.8, B = R * 0.22;
+  g.fillStyle = colour; g.beginPath(); g.moveTo(0, -L / 2); g.quadraticCurveTo(B, -L / 6, B * 0.8, L / 2); g.lineTo(-B * 0.8, L / 2); g.quadraticCurveTo(-B, -L / 6, 0, -L / 2); g.fill();
+  g.translate(0, L / 2); g.rotate(-rud * Math.PI / 180);   // the rudder blade at the stern
+  g.strokeStyle = atLimit(rud) ? css("--bad") : css("--text"); g.lineWidth = 5; g.lineCap = "round";
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(0, L * 0.28); g.stroke();
+  g.restore();
+  const tx = cx + R + 30;
+  g.textAlign = "left"; g.fillStyle = css("--text"); g.font = "600 15px IBM Plex Mono";
+  g.fillText("heading " + fmt(hd) + "°", tx, 28);
+  g.fillStyle = (run.turnCap !== null && Math.abs(cap.s.turn) > run.turnCap) ? css("--bad") : css("--say");
+  g.fillText("turn    " + fmt(cap.s.turn) + "°/s", tx, 50);
+  g.fillStyle = atLimit(rud) ? css("--bad") : css("--say");
+  g.fillText("rudder  " + fmt(rud) + "°", tx, 72);
+  g.fillStyle = css("--dim"); g.font = "12px IBM Plex Mono"; g.fillText("t = " + fmt(run.t) + " s", tx, 92);
+  if (extra) { extra(g, tx, w, h); }
+}
+function rudderGauge(g, x0, w, h) {   // YOUR rudder, big
+  const x1 = w - 12, y = 150, mid = (x0 + x1) / 2, half = (x1 - x0) / 2, lim = run.cfg.limit;
+  const X = v => mid + v / lim * half;
+  g.fillStyle = css("--dim"); g.font = "12px IBM Plex Mono"; g.textAlign = "center";
+  g.fillText("your rudder (hold ← →)", mid, y - 22);
+  g.strokeStyle = css("--line"); g.lineWidth = 10; g.lineCap = "round"; g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+  g.fillText("−" + lim + "°", x0, y + 22); g.fillText("0", mid, y + 22); g.fillText("+" + lim + "°", x1, y + 22);
+  const pid = run.you.last.pidHere.rudder, lqr = run.you.last.lqrHere.rudder;
+  for (const [v, col, lab] of [[pid, "--pid", "PID"], [lqr, "--lqr", "LQR"]]) {
+    g.fillStyle = css(col); g.beginPath(); g.arc(X(v), y, 6, 0, 7); g.fill();
+    g.fillText(lab, X(v), y - 9);
+  }
+  g.fillStyle = css("--you"); g.beginPath(); g.arc(X(run.you.last.rudder), y, 10, 0, 7); g.fill();
+}
+function mpcImagination(g, x0, w, h) {   // the fan of imagined futures
+  const plan = run.mpc.plan; if (!plan) { return; }
+  const x1 = w - 8, y0 = 116, y1 = h - 22, lo = -20, hi = run.cfg.target + 40;
+  const Y = v => y1 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * (y1 - y0);
+  g.strokeStyle = css("--line"); g.lineWidth = 1; g.strokeRect(x0, y0, x1 - x0, y1 - y0);
+  g.fillStyle = css("--dim"); g.font = "11px IBM Plex Mono"; g.textAlign = "left"; g.fillText("heading it imagines, next 8 s", x0 + 4, y0 - 6);
+  const yT = Y(run.cfg.target); g.setLineDash([5, 4]); g.strokeStyle = css("--target"); g.beginPath(); g.moveTo(x0, yT); g.lineTo(x1, yT); g.stroke();
+  g.setLineDash([]);
+  const line = (p, col, wdt) => { g.strokeStyle = col; g.lineWidth = wdt; g.beginPath(); p.path.forEach((v, n) => { const x = x0 + n / (p.path.length - 1) * (x1 - x0); if (n) { g.lineTo(x, Y(v)); } else { g.moveTo(x, Y(v)); } }); g.stroke(); };
+  for (const p of plan.others) { line(p, p.broke ? "rgba(239,95,107,.6)" : "rgba(168,194,212,.35)", 1.2); }
+  line(plan.best, css("--mpc"), 3);
+  g.fillStyle = css("--dim"); g.fillText("teal = chosen · grey = others · red = breaks the rule", x0 + 4, y1 + 15);
+}
+function plot(cv, key, lo, hi, lines, title, unit) {
+  const { g, w, h } = fit(cv);
+  g.clearRect(0, 0, w, h);
+  const L = 52, Rr = w - 10, T = 10, B = h - 22, tMax = HORIZON_S;
+  const X = t => L + t / tMax * (Rr - L), Y = v => B - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * (B - T);
+  g.strokeStyle = css("--line"); g.lineWidth = 1; g.fillStyle = css("--dim"); g.font = "11px IBM Plex Mono"; g.textAlign = "right";
+  const span = hi - lo, stepV = span > 100 ? 30 : span > 40 ? 10 : 2;
+  for (let v = Math.ceil(lo / stepV) * stepV; v <= hi; v += stepV) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(Rr, Y(v)); g.stroke(); g.fillText(v + unit, L - 5, Y(v) + 4); }
+  g.textAlign = "center"; for (let t = 0; t <= tMax; t += 5) { g.fillText(t + " s", X(t), h - 6); }
+  for (const [v, col, dash] of lines) { g.setLineDash(dash); g.strokeStyle = col; g.lineWidth = 2; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(Rr, Y(v)); g.stroke(); }
+  g.setLineDash([]);
+  for (const [cap, col] of [[run.you, "--you"], [run.pid, "--pid"], [run.lqr, "--lqr"], [run.mpc, "--mpc"]]) {
+    g.strokeStyle = css(col); g.lineWidth = cap === run.you ? 1.8 : 2.4; g.beginPath();
+    cap.hist.forEach((p, n) => { if (n) { g.lineTo(X(p.t), Y(p[key])); } else { g.moveTo(X(p.t), Y(p[key])); } });
+    g.stroke();
+  }
+  g.textAlign = "left"; g.fillStyle = css("--say"); g.font = "12px IBM Plex Mono"; g.fillText(title, L + 6, T + 12);
+}
+function formulas() {
+  const c = run.cfg, P = run.pid.last, Q = run.lqr.last, M = run.mpc.last, Y = run.you.last;
+  const lim = (d) => Math.abs(d.wants) > c.limit + 1e-9 ? `<span class="bad">wants ${fmt(d.wants)}° → the limit gives ${fmt(d.rudder)}°</span>` : `<span class="out">rudder = ${fmt(d.rudder)}°</span>`;
+  const err = c.target - run.you.s.heading;
+  document.getElementById("f-you").innerHTML =
+`<span class="t">you see:</span> error <span class="k">${fmt(err)}°</span>   turn <span class="k">${fmt(run.you.s.turn)}°/s</span>
+<span class="t">you give:</span> <span class="out">rudder = ${fmt(Y.rudder)}°</span>
+
+<span class="t">in your spot, right now:</span>
+<span style="color:var(--pid)">PID</span> would give ${fmt(Y.pidHere.rudder)}°  (P ${fmt(Y.pidHere.p)} + I ${fmt(Y.pidHere.i)} + D ${fmt(Y.pidHere.d)})
+<span style="color:var(--lqr)">LQR</span> would give ${fmt(Y.lqrHere.rudder)}°  (${fmt(Y.lqrHere.fromError)} − ${fmt(Y.lqrHere.fromTurn)})`;
+  document.getElementById("f-pid").innerHTML =
+`<span class="t">error = target − heading</span>
+      = ${c.target} − ${fmt(run.pid.s.heading)} = <span class="k">${fmt(P.error)}°</span>
+<span class="t">P</span> = Kp ${fmt(c.Kp, 2)} × error ${fmt(P.error)}          = ${fmt(P.p)}
+<span class="t">I</span> = Ki ${fmt(c.Ki, 2)} × sum ${fmt(P.sum)}°·s ${P.frozen ? '<span class="bad">(frozen)</span>' : ""}  = ${fmt(P.i)}
+<span class="t">D</span> = Kd ${fmt(c.Kd)} × −turn ${fmt(-run.pid.s.turn)}°/s     = ${fmt(P.d)}
+P + I + D = ${fmt(P.wants)}  →  ${lim(P)}`;
+  const g = run.gains;
+  document.getElementById("f-lqr").innerHTML =
+`<span class="t">before the trip: model + qe ${fmt(c.qe)}, qr ${fmt(c.qr)}, R ${fmt(c.R, 2)}
+→ ${g.steps} Riccati steps → 2 fixed gains:</span>
+   kErr = <span class="k">${fmt(g.kErr, 3)}</span>   kTurn = <span class="k">${fmt(g.kTurn, 3)}</span>
+<span class="t">now:</span> error ${fmt(Q.error)}°, turn ${fmt(run.lqr.s.turn)}°/s
+rudder = kErr × error − kTurn × turn
+       = ${fmt(g.kErr, 3)} × ${fmt(Q.error)} − ${fmt(g.kTurn, 3)} × ${fmt(run.lqr.s.turn)}
+       = ${fmt(Q.fromError)} − ${fmt(Q.fromTurn)} = ${fmt(Q.wants)}  →  ${lim(Q)}`;
+  const pl = M.plan, b = pl.best.plan;
+  document.getElementById("f-mpc").innerHTML =
+`<span class="t">imagined</span> ${pl.total} plans × 80 steps = <span class="k">${pl.simulated.toLocaleString()}</span> boat steps
+${run.turnCap !== null ? `<span class="t">thrown out (turn > ${run.turnCap}°/s):</span> <span class="bad">${pl.nBroke}</span> plans\n` : ""}<span class="t">best plan:</span> A ${fmt(b[0])}° for 1 s → B ${fmt(b[1])}° for 2 s → C ${fmt(b[2])}° for 5 s
+<span class="t">its score:</span> ${fmt(pl.best.cost, 0)}${pl.best.broke ? '  <span class="bad">every plan breaks the rule: least bad one</span>' : ""}
+<span class="t">uses only A:</span> <span class="out">rudder = ${fmt(M.rudder)}°</span>
+<span class="t">imagines everything again in</span> ${fmt((MPC_REPLAN - M.age) * DT)} s`;
+}
+function verdictTable() {
+  const c = run.cfg, rows = [["YOU", run.you, "--you", "your brain"], ["PID", run.pid, "--pid", "3 multiplications"], ["LQR", run.lqr, "--lqr", `2 multiplications (+${run.gains.steps} Riccati steps once, before)`], ["MPC", run.mpc, "--mpc", `${(MPC_LEVELS ** 3 * 80).toLocaleString()} imagined steps every 0.5 s`]];
+  const done = run.t >= HORIZON_S - 1e-9;
+  let html = `<tr><th>${done ? "result after " + HORIZON_S + " s" : "running… (" + fmt(run.t) + " s)"}</th><th>overshoot past ${c.target}°</th><th>calm (±2°) from</th><th>error at the end</th><th>fastest turn</th><th>time at the rudder limit</th><th>work per decision</th></tr>`;
+  for (const [name, cap, col, work] of rows) {
+    const v = verdict(cap, c, run.turnCap);
+    html += `<tr><td style="color:var(${col});font-weight:600">${name}</td>
+      <td class="${v.overshoot > 5 ? "warn" : "good"}">${fmt(v.overshoot)}°</td>
+      <td>${done ? (v.settle === null ? '<span class="warn">never</span>' : fmt(v.settle) + " s") : "…"}</td>
+      <td class="${Math.abs(v.endErr) > 1 ? "warn" : "good"}">${fmt(v.endErr)}°</td>
+      <td class="${v.brokeRule ? "warn" : ""}">${fmt(v.maxTurn)}°/s${run.turnCap !== null ? (v.brokeRule ? " 🔴 broke the rule" : " ✅") : ""}</td>
+      <td>${fmt(v.atLimit)} s</td>
+      <td style="color:var(--say)">${work}</td></tr>`;
+  }
+  document.getElementById("verdict").innerHTML = html;
+}
+let acc = 0, lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  if (!paused) {
+    let dir = 0;
+    if (held.right) { dir += 1; }
+    if (held.left) { dir -= 1; }
+    run.you.cmd = clip(run.you.cmd + dir * HAND_SPEED * dt, run.cfg.limit);
+    if (run.t < HORIZON_S - 1e-9) {
+      acc += dt * speed;
+      while (acc >= DT && run.t < HORIZON_S - 1e-9) { stepRun(run); acc -= DT; }
+    }
+  }
+  compass(document.getElementById("cv-you"), run.you, css("--you"), rudderGauge);
+  compass(document.getElementById("cv-pid"), run.pid, css("--pid"));
+  compass(document.getElementById("cv-lqr"), run.lqr, css("--lqr"));
+  compass(document.getElementById("cv-mpc"), run.mpc, css("--mpc"), mpcImagination);
+  formulas();
+  const hi = Math.max(run.cfg.target + 50, 140);
+  plot(document.getElementById("plotH"), "heading", -10, hi, [[run.cfg.target, css("--target"), [6, 5]]], "heading over time", "°");
+  const tc = run.turnCap;
+  plot(document.getElementById("plotR"), "turn", -4, 10, tc !== null ? [[tc, css("--bad"), [3, 3]]] : [], "turn speed over time" + (tc !== null ? "  (red = the 4°/s cargo rule)" : ""), "°/s");
+  plot(document.getElementById("plotU"), "rudder", -run.cfg.limit - 10, run.cfg.limit + 10, [[run.cfg.limit, css("--bad"), [3, 3]], [-run.cfg.limit, css("--bad"), [3, 3]]], "rudder over time  (red = the ± limit)", "°");
+  verdictTable();
+  requestAnimationFrame(frame);
+}
+restart();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

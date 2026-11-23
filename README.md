@@ -12,7 +12,7 @@ Watch how each one decides the rudder, 10 times a second, with every term of its
 
 ## Run
 
-Open `index.html` in a browser. No install, no build.
+Open `index.html` (the lesson list) in a browser. No install, no build. Live: https://mahmutsalman.github.io/BoatControlLab/
 
 ## Scenes (each one shows one trade-off)
 
