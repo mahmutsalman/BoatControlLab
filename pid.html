@@ -99,14 +99,37 @@ const ang = d => (d - 90) * Math.PI / 180;
 function text(s, x, y, size, col, align = "center", bold = true) {
   g.font = (bold ? "600 " : "") + size + "px IBM Plex Mono"; g.fillStyle = col; g.textAlign = align; g.fillText(s, x, y);
 }
+// a ship seen from above, bow pointing up (−y), centred on the origin of the current transform
+function shipShape(L, B, col) {
+  // the white wake behind the stern: two lines opening into a V
+  g.strokeStyle = "rgba(242,242,242,.22)"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(-B * 0.6, L / 2); g.lineTo(-B * 1.6, L * 1.05); g.moveTo(B * 0.6, L / 2); g.lineTo(B * 1.6, L * 1.05); g.stroke();
+  // the hull: a pointed bow, straight sides, a flat stern
+  g.fillStyle = col;
+  g.beginPath();
+  g.moveTo(0, -L / 2);
+  g.quadraticCurveTo(B * 1.05, -L * 0.28, B, -L * 0.05);
+  g.lineTo(B * 0.9, L / 2);
+  g.lineTo(-B * 0.9, L / 2);
+  g.lineTo(-B, -L * 0.05);
+  g.quadraticCurveTo(-B * 1.05, -L * 0.28, 0, -L / 2);
+  g.fill();
+  g.strokeStyle = "rgba(13,27,42,.55)"; g.lineWidth = 1.5; g.stroke();
+  // the deck line and the bridge (cabin) near the stern
+  g.strokeStyle = "rgba(13,27,42,.35)"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, -L * 0.38); g.lineTo(0, L * 0.05); g.stroke();
+  g.fillStyle = "#5a7d9a"; g.fillRect(-B * 0.55, L * 0.12, B * 1.1, L * 0.22);
+  g.fillStyle = "#9fd0f0"; g.fillRect(-B * 0.45, L * 0.13, B * 0.9, L * 0.04);   // the bridge windows look forward
+  // the bow: a small dark mark so the front is obvious
+  g.fillStyle = "rgba(13,27,42,.7)"; g.beginPath(); g.arc(0, -L * 0.36, Math.max(2.5, B * 0.12), 0, 7); g.fill();
+}
 function boat(cx, cy, R, heading, rudder, col) {
   g.strokeStyle = C("--line"); g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
   g.setLineDash([7, 5]); g.strokeStyle = C("--goal"); g.lineWidth = 3;
   g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(ang(GOAL)) * R, cy + Math.sin(ang(GOAL)) * R); g.stroke(); g.setLineDash([]);
   g.save(); g.translate(cx, cy); g.rotate(heading * Math.PI / 180);
   const L = R * 0.85, B = R * 0.24;
-  g.fillStyle = col || C("--boat");
-  g.beginPath(); g.moveTo(0, -L / 2); g.quadraticCurveTo(B, -L / 6, B * 0.8, L / 2); g.lineTo(-B * 0.8, L / 2); g.quadraticCurveTo(-B, -L / 6, 0, -L / 2); g.fill();
+  shipShape(L, B, col || C("--boat"));
   g.translate(0, L / 2); g.rotate(-rudder * Math.PI / 180);
   g.strokeStyle = C("--rud"); g.lineWidth = 6; g.lineCap = "round"; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, L * 0.3); g.stroke();
   g.restore();
@@ -173,6 +196,8 @@ const SIDE_0 = pidTrip(3, 0, 0, 0, 36);
 const SIDE_6 = pidTrip(3, 0, 6, 0, 36);
 const SIDE_10 = pidTrip(3, 0, 10, 0, 36);
 const ONLY_P = pidTrip(3, 0, 0, 0, 40);
+const I_CALM_P = seaTrip({ start: 60, Kp: 1, Ki: 0, Kd: 0, seconds: 40, push: () => 0 });     // no wind, P alone
+const I_CALM_PI = seaTrip({ start: 60, Kp: 1, Ki: 0.1, Kd: 0, seconds: 40, push: () => 0 });  // no wind, P + I
 const I_WIND = seaTrip({ start: 90, Kp: 1, Ki: 0.1, Kd: 0, seconds: 40, push: () => -0.6 });   // on the line, then a steady wind
 function gust(t) { if (t >= 2 && t < 3.5) { return -3; } return 0; }                       // a 1.5 s gust pushing the bow left
 const GUST_NONE = seaTrip({ start: 90, Kp: 0, Ki: 0, Kd: 0, seconds: 20, push: gust });
@@ -199,7 +224,14 @@ function scripted(seconds, errorAt) {
   for (let n = 0; n <= seconds / DT; n++) { rows.push({ t: n * DT, e: errorAt(n * DT) }); }
   return rows;
 }
-const STEP = scripted(12, t => { if (t >= 3 && t < 9) { return 60; } return 20; });
+// 20° → 60° → 20°, each change taking 1 s (a ship can't jump)
+const STEP = scripted(12, t => {
+  if (t < 3) { return 20; }
+  if (t < 4) { return 20 + 40 * (t - 3); }
+  if (t < 9) { return 60; }
+  if (t < 10) { return 60 - 40 * (t - 9); }
+  return 20;
+});
 const SMALL = scripted(12, t => { if (t < 6) { return 20; } return 0; });
 const BIG = scripted(12, t => { if (t < 8) { return 40; } return 0; });
 function areaUpTo(rows, t) { let a = 0; for (const r of rows) { if (r.t >= t) { break; } a += r.e * DT; } return a; }
@@ -333,8 +365,9 @@ const SCREENS = [
       text("error", 150, 150, 20, C("--dim")); text(r.e + "°", 150, 200, 44, C("--err"));
       text("× 0.5", 300, 200, 30, C("--dim"));
       text("P", 150, 300, 20, C("--dim")); text(fmt(0.5 * r.e) + "°", 150, 350, 44, C("--p"));
-      boat(380, 380, 90, 0, 0.5 * r.e);
-      text("rudder", 380, 500, 16, C("--rud"));
+      boat(380, 380, 90, 90 - r.e, 0.5 * r.e);                  // error 20° = the nose at 70°
+      text("rudder " + fmt(0.5 * r.e) + "°", 380, 498, 16, C("--rud"));
+      text("a still picture: the ship frozen at each error", 380, 270, 13, C("--dim"), "center", false);
   } },
   { title: "P alone on the boat", cap: "P alone: swings past the line, then settles (Kp = 3)", dur: 30, speed: 2, draw(t) {
       const r = at(P_ALONE, t), over = maxOf(P_ALONE, "heading") - GOAL;
@@ -366,6 +399,31 @@ const SCREENS = [
       text("→ error must stay 9°", 800, 335, 18, C("--far"));
       text("now: error " + fmt(a.error) + "°", 800, 400, 16, C("--boat"));
       text("rudder " + fmt(a.rudder) + "°", 800, 430, 16, C("--rud"));
+  } },
+  { title: "I without wind", cap: "no wind: the sum grows while you're short, peaks AT the line, shrinks after", dur: 40, speed: 2.5, draw(t) {
+      const a = at(I_CALM_P, t), b = at(I_CALM_PI, t);
+      boat(95, 125, 75, a.heading, a.rudder); text("P alone", 95, 225, 15, C("--boat"));
+      boat(95, 355, 75, b.heading, b.rudder, C("--i")); text("P + I", 95, 455, 15, C("--i"));
+      graph(250, 40, 400, 190, { tMax: 40, vMin: 55, vMax: 110, now: t, label: "heading (°)", ticks: [60, 90, 105], xStep: 10,
+        lines: [{ v: 90, col: C("--goal"), label: "" }],
+        series: [{ rows: I_CALM_P, value: x => x.heading, col: C("--boat") }, { rows: I_CALM_PI, value: x => x.heading, col: C("--i") }] });
+      graph(250, 300, 400, 170, { tMax: 40, vMin: 0, vMax: 150, now: t, label: "P + I: the sum (°·s)", ticks: [0, 50, 100, 150], xStep: 10,
+        series: [{ rows: I_CALM_PI, value: x => x.sum, col: C("--i") }] });
+      text("P + I, now:", 830, 70, 16, C("--i"));
+      text("error " + fmt(b.error) + "°", 830, 105, 17, C("--err"));
+      text("sum " + fmt(b.sum) + " °·s", 830, 135, 17, C("--i"));
+      text("I = 0.1 × sum = " + fmt(b.i), 830, 165, 17, C("--i"));
+      text("P = " + fmt(b.p), 830, 195, 17, C("--p"));
+      text("rudder " + fmt(b.rudder) + "°", 830, 225, 17, C("--rud"));
+      let say = "error > 0 → the sum GROWS";
+      if (b.error < 0) { say = "error < 0 → the sum SHRINKS"; }
+      text(say, 830, 275, 15, C("--say"), "center", false);
+      if (t > 12) {
+        text("highest: P " + fmt(maxOf(I_CALM_P, "heading")) + "°", 830, 340, 15, C("--boat"));
+        text("P + I " + fmt(maxOf(I_CALM_PI, "heading")) + "°", 830, 368, 15, C("--i"));
+        text("no wind → I is not needed", 830, 420, 15, C("--far"));
+        text("it only adds a swing", 830, 446, 15, C("--far"));
+      }
   } },
   { title: "I = Ki × (error × time)", cap: "while the error stays, the sum grows → I pushes harder (Kp 1, Ki 0.1, wind)", dur: 40, speed: 2.5, draw(t) {
       const r = at(I_WIND, t);

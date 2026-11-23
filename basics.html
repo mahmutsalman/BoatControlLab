@@ -67,12 +67,34 @@ function gapArc(cx, cy, r, from, to, col) {            // the coloured arc betwe
   g.strokeStyle = col; g.lineWidth = 10; g.lineCap = "butt";
   g.beginPath(); g.arc(cx, cy, r, ang(Math.min(from, to)), ang(Math.max(from, to))); g.stroke();
 }
+// a ship seen from above, bow pointing up (−y), centred on the origin of the current transform
+function shipShape(L, B, col) {
+  // the white wake behind the stern: two lines opening into a V
+  g.strokeStyle = "rgba(242,242,242,.22)"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(-B * 0.6, L / 2); g.lineTo(-B * 1.6, L * 1.05); g.moveTo(B * 0.6, L / 2); g.lineTo(B * 1.6, L * 1.05); g.stroke();
+  // the hull: a pointed bow, straight sides, a flat stern
+  g.fillStyle = col;
+  g.beginPath();
+  g.moveTo(0, -L / 2);
+  g.quadraticCurveTo(B * 1.05, -L * 0.28, B, -L * 0.05);
+  g.lineTo(B * 0.9, L / 2);
+  g.lineTo(-B * 0.9, L / 2);
+  g.lineTo(-B, -L * 0.05);
+  g.quadraticCurveTo(-B * 1.05, -L * 0.28, 0, -L / 2);
+  g.fill();
+  g.strokeStyle = "rgba(13,27,42,.55)"; g.lineWidth = 1.5; g.stroke();
+  // the deck line and the bridge (cabin) near the stern
+  g.strokeStyle = "rgba(13,27,42,.35)"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, -L * 0.38); g.lineTo(0, L * 0.05); g.stroke();
+  g.fillStyle = "#5a7d9a"; g.fillRect(-B * 0.55, L * 0.12, B * 1.1, L * 0.22);
+  g.fillStyle = "#9fd0f0"; g.fillRect(-B * 0.45, L * 0.13, B * 0.9, L * 0.04);   // the bridge windows look forward
+  // the bow: a small dark mark so the front is obvious
+  g.fillStyle = "rgba(13,27,42,.7)"; g.beginPath(); g.arc(0, -L * 0.36, Math.max(2.5, B * 0.12), 0, 7); g.fill();
+}
 function boat(cx, cy, R, heading, rudder, col) {
   g.save(); g.translate(cx, cy); g.rotate(heading * Math.PI / 180);
   const L = R * 0.85, B = R * 0.24;
-  g.fillStyle = col || C("--boat");
-  g.beginPath(); g.moveTo(0, -L / 2); g.quadraticCurveTo(B, -L / 6, B * 0.8, L / 2); g.lineTo(-B * 0.8, L / 2); g.quadraticCurveTo(-B, -L / 6, 0, -L / 2); g.fill();
-  g.fillStyle = C("--bg"); g.beginPath(); g.arc(0, -L / 2 + 10, 4, 0, 7); g.fill();   // the nose dot
+  shipShape(L, B, col || C("--boat"));
   if (rudder !== undefined) {
     g.translate(0, L / 2); g.rotate(-rudder * Math.PI / 180);
     g.strokeStyle = C("--rud"); g.lineWidth = 7; g.lineCap = "round";
