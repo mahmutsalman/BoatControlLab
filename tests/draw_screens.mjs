@@ -5,7 +5,7 @@ const file = process.argv[2];
 const html = fs.readFileSync(file, "utf8");
 const js = html.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/requestAnimationFrame\(frame\);\s*<?\/?$/,"");
 const ctx2d = new Proxy({}, { get: (o, k) => (k in o ? o[k] : () => {}), set: (o, k, v) => { o[k] = v; return true; } });
-const el = () => ({ getContext: () => ctx2d, width: 1000, height: 520, textContent: "", innerHTML: "", children: [], dataset: {}, classList: { toggle() {} }, set onclick(f) {}, addEventListener() {} });
+const el = () => ({ style: {}, value: "50", blur() {}, getContext: () => ctx2d, width: 1000, height: 520, textContent: "", innerHTML: "", children: [], dataset: {}, classList: { toggle() {} }, set onclick(f) {}, addEventListener() {} });
 const els = {};
 const sandbox = { document: { getElementById: id => (els[id] ||= el()), documentElement: {} }, getComputedStyle: () => ({ getPropertyValue: () => "#fff" }),
   window: { addEventListener() {}, devicePixelRatio: 1 }, performance: { now: () => 0 }, requestAnimationFrame: () => {}, console, Math };

@@ -69,6 +69,25 @@ function pidTrip(Kp, Ki, Kd, wind, seconds) {
   }
   return rows;
 }
+// a trip with any start and any push from the sea (push(t) in °/s²), same PID rules as pidTrip
+function seaTrip(o) {
+  let heading = o.start, turn = 0, sum = 0;
+  const rows = [];
+  for (let n = 0; n <= o.seconds / DT; n++) {
+    const t = n * DT, error = GOAL - heading;
+    const p = o.Kp * error;
+    const d = o.Kd * (-turn);
+    const wantsIfAdded = p + o.Ki * (sum + error * DT) + d;
+    if (o.Ki > 0 && Math.abs(wantsIfAdded) < LIMIT) { sum += error * DT; }
+    const i = o.Ki * sum;
+    const rudder = clip(p + i + d);
+    rows.push({ t, heading, turn, error, sum, p, i, d, rudder });
+    const newTurn = turn + DT * ((KB * rudder - turn) / T + o.push(t));
+    heading = heading + DT * newTurn;
+    turn = newTurn;
+  }
+  return rows;
+}
 const at = (rows, t) => rows[Math.min(rows.length - 1, Math.floor(t / DT))];
 const fmt = x => (Math.round(x * 10) / 10).toFixed(1);
 const maxOf = (rows, key) => Math.max(...rows.map(r => r[key]));
@@ -99,6 +118,13 @@ function graph(x, y, w, h, opt) {
   g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x, y + h); g.lineTo(x + w + 8, y + h); g.stroke();
   text(opt.label, x - 12, y - 14, 15, C("--dim"), "left");
   text("time", x + w, y + h + 20, 13, C("--dim"), "right", false);
+  for (const v of (opt.ticks || [])) {                   // numbers on the y axis + a light grid
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, Y(v)); g.lineTo(x + w, Y(v)); g.stroke();
+    text(String(v), x - 6, Y(v) + 4, 12, C("--dim"), "right", false);
+  }
+  if (opt.xStep) {                                         // numbers on the time axis
+    for (let tt = 0; tt <= opt.tMax; tt += opt.xStep) { text(tt + "s", X(tt), y + h + 16, 12, C("--dim"), "center", false); }
+  }
   for (const hl of (opt.lines || [])) {
     g.setLineDash([6, 5]); g.strokeStyle = hl.col; g.lineWidth = 2;
     g.beginPath(); g.moveTo(x, Y(hl.v)); g.lineTo(x + w, Y(hl.v)); g.stroke(); g.setLineDash([]);
@@ -147,6 +173,10 @@ const SIDE_0 = pidTrip(3, 0, 0, 0, 36);
 const SIDE_6 = pidTrip(3, 0, 6, 0, 36);
 const SIDE_10 = pidTrip(3, 0, 10, 0, 36);
 const ONLY_P = pidTrip(3, 0, 0, 0, 40);
+const I_WIND = seaTrip({ start: 90, Kp: 1, Ki: 0.1, Kd: 0, seconds: 40, push: () => -0.6 });   // on the line, then a steady wind
+function gust(t) { if (t >= 2 && t < 3.5) { return -3; } return 0; }                       // a 1.5 s gust pushing the bow left
+const GUST_NONE = seaTrip({ start: 90, Kp: 0, Ki: 0, Kd: 0, seconds: 20, push: gust });
+const GUST_D = seaTrip({ start: 90, Kp: 0, Ki: 0, Kd: 6, seconds: 20, push: gust });
 const ONLY_I = pidTrip(0, 0.1, 0, 0, 40);
 const ONLY_D = pidTrip(0, 0, 6, 0, 40);
 // the "what the order means" boats: start somewhere, hold ONE rudder order, watch which way the nose goes
@@ -337,22 +367,21 @@ const SCREENS = [
       text("now: error " + fmt(a.error) + "°", 800, 400, 16, C("--boat"));
       text("rudder " + fmt(a.rudder) + "°", 800, 430, 16, C("--rud"));
   } },
-  { title: "I = Ki × (error × time)", cap: "I adds up error × time: the area under the error", dur: 12, draw(t) {
-      const gr1 = graph(80, 60, 420, 160, { tMax: 12, vMin: 0, vMax: 50, now: t, label: "error", series: [{ rows: SMALL, value: x => x.e, col: C("--err") }, { rows: BIG, value: x => x.e, col: C("--err2") }] });
-      g.fillStyle = "rgba(91,140,255,.25)"; g.fillRect(gr1.X(0), gr1.Y(20), gr1.X(Math.min(t, 6)) - gr1.X(0), gr1.Y(0) - gr1.Y(20));
-      g.fillStyle = "rgba(79,224,176,.15)"; g.fillRect(gr1.X(0), gr1.Y(40), gr1.X(Math.min(t, 8)) - gr1.X(0), gr1.Y(20) - gr1.Y(40));
-      graph(80, 310, 420, 160, { tMax: 12, vMin: 0, vMax: 340, now: t, label: "area so far (the sum)", series: [{ rows: SMALL, value: x => areaUpTo(SMALL, x.t), col: C("--err") }, { rows: BIG, value: x => areaUpTo(BIG, x.t), col: C("--err2") }] });
-      // the blue case on a boat: 20° off for 6 s; I's order = Ki × sum (Ki = 0.1)
-      const e = at(SMALL, t).e, sum = areaUpTo(SMALL, t), iOrder = 0.1 * sum;
-      text("blue boat: 20° off for 6 s", 760, 28, 15, C("--err"));
-      boat(760, 150, 95, 90 - e, Math.min(LIMIT, iOrder));
-      text("error " + fmt(e) + "°", 760, 290, 18, C("--err"));
-      text("sum = " + fmt(sum) + " (°·s)", 760, 320, 17, C("--err"));
-      text("I = 0.1 × " + fmt(sum) + " = " + fmt(iOrder), 760, 350, 18, C("--i"));
-      text("rudder " + fmt(Math.min(LIMIT, iOrder)) + "°", 760, 380, 18, C("--rud"));
-      if (e === 0 && sum > 0) { text("error 0, but I STILL pushes " + fmt(iOrder) + "°", 760, 412, 15, C("--far")); }
-      text("green: 40° for 8 s → sum " + fmt(areaUpTo(BIG, t)) + " → I " + fmt(0.1 * areaUpTo(BIG, t)), 760, 455, 14, C("--err2"), "center", false);
-      text("error gone → the sum stays → I keeps its push", 760, 490, 14, C("--say"), "center", false);
+  { title: "I = Ki × (error × time)", cap: "while the error stays, the sum grows → I pushes harder (Kp 1, Ki 0.1, wind)", dur: 40, speed: 2.5, draw(t) {
+      const r = at(I_WIND, t);
+      graph(80, 50, 430, 170, { tMax: 40, vMin: -4, vMax: 10, now: t, label: "error (°)", ticks: [0, 5, 10], xStep: 10,
+        series: [{ rows: I_WIND, value: x => x.error, col: C("--err") }] });
+      graph(80, 300, 430, 170, { tMax: 40, vMin: 0, vMax: 100, now: t, label: "sum = area so far (°·s)", ticks: [0, 50, 100], xStep: 10,
+        series: [{ rows: I_WIND, value: x => x.sum, col: C("--i") }] });
+      boat(760, 145, 95, r.heading, r.rudder);
+      text("wind ←", 760, 32, 15, C("--wind"));
+      text("error " + fmt(r.error) + "°", 760, 285, 18, C("--err"));
+      text("sum = " + fmt(r.sum) + " °·s", 760, 313, 17, C("--i"));
+      text("I = 0.1 × " + fmt(r.sum) + " = " + fmt(r.i), 760, 341, 18, C("--i"));
+      text("P = 1 × " + fmt(r.error) + " = " + fmt(r.p), 760, 369, 17, C("--p"));
+      text("rudder = P + I = " + fmt(r.rudder) + "°", 760, 397, 18, C("--rud"));
+      if (t > 25) { text("error ≈ 0 → the sum stops growing", 760, 440, 15, C("--say"), "center", false); text("I ≈ 9 holds the wind by itself", 760, 466, 15, C("--i")); }
+      else if (r.error > 1) { text("error > 0 → the sum keeps growing", 760, 440, 15, C("--say"), "center", false); }
   } },
   { title: "P + I on the boat, in the wind", cap: "I slowly takes over the 9° → error goes to 0 (Kp 1, Ki 0.05)", dur: 50, speed: 3, draw(t) {
       const r = at(PI_WIND, t);
@@ -363,20 +392,25 @@ const SCREENS = [
       text("error " + fmt(r.error) + "°", 780, 300, 26, C("--err"));
       if (t > 40) { text("I holds the wind, P ≈ 0", 780, 360, 18, C("--i")); }
   } },
-  { title: "D = Kd × slope", cap: "D looks at how FAST the error changes, not how big it is (Kd = 2)", dur: 10, draw(t) {
-      graph(560, 60, 380, 150, { tMax: 10, vMin: 0, vMax: 55, now: t, label: "error", series: [{ rows: RAMP5, value: x => x.e, col: C("--err") }, { rows: RAMP8, value: x => x.e, col: C("--err2") }] });
-      graph(560, 300, 380, 150, { tMax: 10, vMin: 0, vMax: 20, now: t, label: "D action", series: [{ rows: RAMP5, value: x => 2 * slopeAt(x.t, 5), col: C("--err") }, { rows: RAMP8, value: x => 2 * slopeAt(x.t, 8), col: C("--err2") }] });
-      // the blue case on a boat: the nose drifts AWAY from the line at 5°/s; D's order = Kd × slope (Kd = 2)
-      const e = at(RAMP5, t).e, slope = slopeAt(t, 5), dOrder = 2 * slope;
-      text("blue boat: drifting away at 5°/s", 250, 28, 15, C("--err"));
-      boat(250, 150, 95, 90 - e, dOrder);
-      text("error " + fmt(e) + "°", 250, 290, 18, C("--err"));
-      text("slope " + fmt(slope) + "°/s", 250, 320, 17, C("--err"));
-      text("D = 2 × " + fmt(slope) + " = " + fmt(dOrder), 250, 350, 18, C("--d"));
-      text("rudder " + fmt(dOrder) + "°", 250, 380, 18, C("--rud"));
-      if (t > 7) { text("error " + fmt(e) + "° but NOT changing → D = 0", 250, 412, 15, C("--far")); }
-      text("green: slope 8°/s → D = 2 × 8 = " + fmt(2 * slopeAt(t, 8)), 250, 455, 14, C("--err2"), "center", false);
-      text("on our boat: slope of error = −turn", 250, 490, 14, C("--turn"), "center", false);
+  { title: "D = Kd × slope", cap: "a gust starts a swing: D brakes it, but does NOT bring the boat back (Kd 6)", dur: 20, speed: 1.5, draw(t) {
+      const a = at(GUST_NONE, t), b = at(GUST_D, t);
+      boat(110, 130, 80, a.heading, a.rudder); text("no controller", 110, 235, 15, C("--boat"));
+      boat(110, 360, 80, b.heading, b.rudder, C("--d")); text("only D", 110, 465, 15, C("--d"));
+      if (t >= 2 && t < 3.5) { text("💨 gust!", 110, 30, 18, C("--wind")); }
+      graph(290, 50, 380, 400, { tMax: 20, vMin: 70, vMax: 95, now: t, label: "heading (°)", ticks: [75, 80, 85, 90], xStep: 5,
+        lines: [{ v: 90, col: C("--goal"), label: "" }],
+        series: [{ rows: GUST_NONE, value: x => x.heading, col: C("--boat") }, { rows: GUST_D, value: x => x.heading, col: C("--d") }] });
+      text("only D, now:", 845, 110, 16, C("--d"));
+      text("turn " + fmt(b.turn) + "°/s", 845, 150, 17, C("--turn"));
+      text("slope of error = −turn = " + fmt(-b.turn), 845, 180, 14, C("--err"), "center", false);
+      text("D = 6 × " + fmt(-b.turn) + " = " + fmt(b.d), 845, 215, 18, C("--d"));
+      text("rudder " + fmt(b.rudder) + "°", 845, 250, 18, C("--rud"));
+      if (t > 8) {
+        text("no controller: " + fmt(GUST_NONE[GUST_NONE.length - 1].heading) + "°", 845, 330, 15, C("--boat"));
+        text("only D: " + fmt(GUST_D[GUST_D.length - 1].heading) + "°", 845, 358, 15, C("--d"));
+        text("stopped turning → D = 0", 845, 400, 15, C("--say"), "center", false);
+        text("nobody brings it back: P's job", 845, 426, 15, C("--far"));
+      }
   } },
   { title: "D on the boat = the brake", cap: "D pulls the rudder back early → no swing past the line", dur: 30, speed: 2, draw(t) {
       const a = at(P_ALONE, t), b = at(PD, t);
