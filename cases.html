@@ -19,7 +19,7 @@ a.btn{font:inherit;background:var(--line);color:var(--text);border-radius:8px;pa
 .head .e{color:var(--err)} .head .p{color:var(--p)} .head .i{color:var(--i)} .head .d{color:var(--d)}
 .case{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px}
 .name{font-weight:600;font-size:15px;display:flex;align-items:center}
-canvas{width:100%;height:120px;background:#0a1624;border-radius:8px;display:block}
+canvas{width:100%;height:170px;background:#0a1624;border-radius:8px;display:block}
 .words{display:grid;grid-template-columns:180px repeat(4,1fr);gap:8px;margin-top:6px;color:var(--say);font-size:13px}
 .words div{text-align:center}
 @media (max-width:800px){.head,.row,.words{grid-template-columns:1fr 1fr}.head div:first-child,.row .name,.words div:first-child{grid-column:1/-1}}
@@ -70,6 +70,7 @@ for (const c of CASES) {
 // one fixed scale per column, so rows can be compared by eye
 const SCALE = { e: [-25, 35], p: [-25, 35], i: [-10, 70], d: [-10, 12] };
 const COL = { e: "--err", p: "--p", i: "--i", d: "--d" };
+const TICKS = { e: [-20, 0, 20], p: [-20, 0, 20], i: [0, 20, 40, 60], d: [-8, -4, 0, 4, 8] };
 
 // ---------- build the page ----------
 const box = document.getElementById("rows");
@@ -86,10 +87,22 @@ function draw(cv, rows, key, now) {
   const r = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
   if (cv.width !== Math.round(w * r)) { cv.width = Math.round(w * r); cv.height = Math.round(h * r); }
   const g = cv.getContext("2d"); g.setTransform(r, 0, 0, r, 0, 0); g.clearRect(0, 0, w, h);
-  const [lo, hi] = SCALE[key], L = 8, R = w - 8, T = 18, B = h - 8;
+  const [lo, hi] = SCALE[key], L = 38, R = w - 10, T = 22, B = h - 24;
   const X = t => L + t / SECONDS * (R - L);
   const Y = v => B - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * (B - T);
-  g.strokeStyle = css("--line"); g.lineWidth = 1; g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(R, Y(0)); g.stroke();   // the zero line
+  // a normal graph: grid, numbers on both axes, the x axis at y = 0
+  g.font = "11px IBM Plex Mono"; g.lineWidth = 1;
+  for (const v of TICKS[key]) {
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(R, Y(v)); g.stroke();
+    g.fillStyle = css("--dim"); g.textAlign = "right"; g.fillText(String(v), L - 5, Y(v) + 4);
+  }
+  for (let t = 0; t <= SECONDS; t += 2) {
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.beginPath(); g.moveTo(X(t), T); g.lineTo(X(t), B); g.stroke();
+    g.fillStyle = css("--dim"); g.textAlign = "center"; g.fillText(t + "s", X(t), h - 8);
+  }
+  g.strokeStyle = css("--dim"); g.lineWidth = 1.5;
+  g.beginPath(); g.moveTo(L, T - 6); g.lineTo(L, B); g.stroke();                 // the y axis
+  g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(R + 4, Y(0)); g.stroke();             // the x axis (time), at 0
   g.strokeStyle = css(COL[key]); g.lineWidth = 2.5; g.beginPath();
   rows.forEach((p, n) => { if (n === 0) { g.moveTo(X(p.t), Y(p[key])); } else { g.lineTo(X(p.t), Y(p[key])); } });
   g.stroke();
