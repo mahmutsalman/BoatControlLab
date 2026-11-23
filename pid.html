@@ -140,7 +140,7 @@ function graph(x, y, w, h, opt) {
   g.strokeStyle = C("--dim"); g.lineWidth = 2;
   g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x, y + h); g.lineTo(x + w + 8, y + h); g.stroke();
   text(opt.label, x - 12, y - 14, 15, C("--dim"), "left");
-  text("time", x + w, y + h + 20, 13, C("--dim"), "right", false);
+  if (!opt.xStep) { text("time", x + w, y + h + 20, 13, C("--dim"), "right", false); }
   for (const v of (opt.ticks || [])) {                   // numbers on the y axis + a light grid
     g.strokeStyle = "rgba(138,163,181,.15)"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, Y(v)); g.lineTo(x + w, Y(v)); g.stroke();
     text(String(v), x - 6, Y(v) + 4, 12, C("--dim"), "right", false);
@@ -155,13 +155,15 @@ function graph(x, y, w, h, opt) {
   }
   for (const s of opt.series) {
     g.strokeStyle = s.col; g.lineWidth = 3; g.beginPath();
-    let first = true;
+    let first = true, last = null;
     for (const r of s.rows) {
       if (r.t > opt.now) { break; }
       const v = s.value(r);
       if (first) { g.moveTo(X(r.t), Y(v)); first = false; } else { g.lineTo(X(r.t), Y(v)); }
+      last = { x: X(r.t), y: Y(v) };
     }
     g.stroke();
+    if (s.name && last) { text(s.name, last.x + 8, last.y + (s.nameDy || 0) + 5, 13, s.col, "left"); }   // the line's name at its tip
   }
   return { X, Y };
 }
@@ -406,9 +408,9 @@ const SCREENS = [
       boat(95, 355, 75, b.heading, b.rudder, C("--i")); text("P + I", 95, 455, 15, C("--i"));
       graph(250, 40, 400, 190, { tMax: 40, vMin: 55, vMax: 110, now: t, label: "heading (°)", ticks: [60, 90, 105], xStep: 10,
         lines: [{ v: 90, col: C("--goal"), label: "" }],
-        series: [{ rows: I_CALM_P, value: x => x.heading, col: C("--boat") }, { rows: I_CALM_PI, value: x => x.heading, col: C("--i") }] });
-      graph(250, 300, 400, 170, { tMax: 40, vMin: 0, vMax: 150, now: t, label: "P + I: the sum (°·s)", ticks: [0, 50, 100, 150], xStep: 10,
-        series: [{ rows: I_CALM_PI, value: x => x.sum, col: C("--i") }] });
+        series: [{ rows: I_CALM_P, value: x => x.heading, col: C("--boat"), name: "P alone", nameDy: 12 }, { rows: I_CALM_PI, value: x => x.heading, col: C("--i"), name: "P + I", nameDy: -10 }] });
+      graph(250, 300, 400, 170, { tMax: 40, vMin: -40, vMax: 150, now: t, label: "NOT heading: the P + I ship's memory (sum, °·s)", ticks: [0, 50, 100, 150], xStep: 10,
+        series: [{ rows: I_CALM_PI, value: x => x.sum, col: C("--i"), name: "sum" }] });
       text("P + I, now:", 830, 70, 16, C("--i"));
       text("error " + fmt(b.error) + "°", 830, 105, 17, C("--err"));
       text("sum " + fmt(b.sum) + " °·s", 830, 135, 17, C("--i"));
