@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PID on the Boat</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1b2a;--panel:#112236;--line:#1e4060;--text:#d4e8f7;--say:#a8c2d4;--dim:#8aa3b5;
+  --boat:#f2f2f2;--goal:#7fd77f;--err:#5b8cff;--err2:#4fe0b0;--p:#8f7cff;--i:#ff6ad5;--d:#4aa3ff;--rud:#c792ea;--far:#ef5f6b;--turn:#4fd1c5;--wind:#f4a261}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px "IBM Plex Mono",monospace;display:flex;flex-direction:column;align-items:center;padding:16px}
+.top{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--line);cursor:pointer}
+.dot.on{background:var(--text)}
+button,a.btn{font:inherit;background:var(--line);color:var(--text);border:0;border-radius:8px;padding:6px 14px;cursor:pointer;text-decoration:none}
+h1{font-size:28px;margin:6px 0 4px}
+canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display:block}
+.cap{font-size:22px;color:var(--say);margin:14px 0 4px;text-align:center}
+.hint{color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<div class="top"><a class="btn" href="index.html">⌂</a><button id="prev">←</button><div id="dots" style="display:flex;gap:8px"></div><button id="next">→</button></div>
+<h1 id="title"></h1>
+<canvas id="cv" width="1000" height="520"></canvas>
+<div class="cap" id="cap"></div>
+<div class="hint">← → next screen · space = pause · it loops</div>
+
+<script>
+// ---------- the boat and a PID captain (same model as the lab) ----------
+const DT = 0.1, KB = 0.2, T = 3, LIMIT = 35, GOAL = 90;
+function clip(x) {
+  if (x > LIMIT) { return LIMIT; }
+  if (x < -LIMIT) { return -LIMIT; }
+  return x;
+}
+// one trip with a PID captain; every 0.1 s we keep every number so the screens can show it
+function pidTrip(Kp, Ki, Kd, wind, seconds) {
+  let heading = 0, turn = 0, sum = 0;
+  const rows = [];
+  for (let n = 0; n <= seconds / DT; n++) {
+    const error = GOAL - heading;
+    const p = Kp * error;
+    const d = Kd * (-turn);                       // the error shrinks as fast as the boat turns
+    const wantsIfAdded = p + Ki * (sum + error * DT) + d;
+    if (Ki > 0 && Math.abs(wantsIfAdded) < LIMIT) {
+      sum += error * DT;                           // the memory only grows while the rudder is not stuck at the limit
+    }
+    const i = Ki * sum;
+    const rudder = clip(p + i + d);
+    rows.push({ t: n * DT, heading, turn, error, p, i, d, rudder });
+    const newTurn = turn + DT * ((KB * rudder - turn) / T + wind);
+    heading = heading + DT * newTurn;
+    turn = newTurn;
+  }
+  return rows;
+}
+const at = (rows, t) => rows[Math.min(rows.length - 1, Math.floor(t / DT))];
+const fmt = x => (Math.round(x * 10) / 10).toFixed(1);
+const maxOf = (rows, key) => Math.max(...rows.map(r => r[key]));
+
+// ---------- drawing helpers ----------
+const cv = document.getElementById("cv"), g = cv.getContext("2d");
+const C = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ang = d => (d - 90) * Math.PI / 180;
+function text(s, x, y, size, col, align = "center", bold = true) {
+  g.font = (bold ? "600 " : "") + size + "px IBM Plex Mono"; g.fillStyle = col; g.textAlign = align; g.fillText(s, x, y);
+}
+function boat(cx, cy, R, heading, rudder, col) {
+  g.strokeStyle = C("--line"); g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+  g.setLineDash([7, 5]); g.strokeStyle = C("--goal"); g.lineWidth = 3;
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(ang(GOAL)) * R, cy + Math.sin(ang(GOAL)) * R); g.stroke(); g.setLineDash([]);
+  g.save(); g.translate(cx, cy); g.rotate(heading * Math.PI / 180);
+  const L = R * 0.85, B = R * 0.24;
+  g.fillStyle = col || C("--boat");
+  g.beginPath(); g.moveTo(0, -L / 2); g.quadraticCurveTo(B, -L / 6, B * 0.8, L / 2); g.lineTo(-B * 0.8, L / 2); g.quadraticCurveTo(-B, -L / 6, 0, -L / 2); g.fill();
+  g.translate(0, L / 2); g.rotate(-rudder * Math.PI / 180);
+  g.strokeStyle = C("--rud"); g.lineWidth = 6; g.lineCap = "round"; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, L * 0.3); g.stroke();
+  g.restore();
+}
+// a time graph like the video's: axes, an optional dashed setpoint, one or more lines drawn up to "now"
+function graph(x, y, w, h, opt) {
+  const X = t => x + t / opt.tMax * w, Y = v => y + h - (v - opt.vMin) / (opt.vMax - opt.vMin) * h;
+  g.strokeStyle = C("--dim"); g.lineWidth = 2;
+  g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x, y + h); g.lineTo(x + w + 8, y + h); g.stroke();
+  text(opt.label, x - 12, y - 14, 15, C("--dim"), "left");
+  text("time", x + w, y + h + 20, 13, C("--dim"), "right", false);
+  for (const hl of (opt.lines || [])) {
+    g.setLineDash([6, 5]); g.strokeStyle = hl.col; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x, Y(hl.v)); g.lineTo(x + w, Y(hl.v)); g.stroke(); g.setLineDash([]);
+    text(hl.label, x - 8, Y(hl.v) + 5, 13, hl.col, "right");
+  }
+  for (const s of opt.series) {
+    g.strokeStyle = s.col; g.lineWidth = 3; g.beginPath();
+    let first = true;
+    for (const r of s.rows) {
+      if (r.t > opt.now) { break; }
+      const v = s.value(r);
+      if (first) { g.moveTo(X(r.t), Y(v)); first = false; } else { g.lineTo(X(r.t), Y(v)); }
+    }
+    g.stroke();
+  }
+  return { X, Y };
+}
+// one bar per part (P, I, D) and their sum: the rudder
+function bars(x, y, parts) {
+  const scale = 5, mid = x + 150;
+  g.strokeStyle = C("--line"); g.lineWidth = 1; g.beginPath(); g.moveTo(mid, y - 18); g.lineTo(mid, y + parts.length * 34); g.stroke();
+  parts.forEach((p, k) => {
+    const yy = y + k * 34, len = Math.max(-140, Math.min(140, p.v * scale / 1.4));
+    g.fillStyle = p.col; g.fillRect(Math.min(mid, mid + len), yy, Math.abs(len), 22);
+    text(p.name, x, yy + 17, 16, p.col, "left");
+    text(fmt(p.v) + "°", x + 310, yy + 17, 16, p.col, "left");
+  });
+}
+function pinkArrow(x, y1, y2, label) {
+  g.strokeStyle = C("--i"); g.fillStyle = C("--i"); g.lineWidth = 4;
+  g.beginPath(); g.moveTo(x, y1); g.lineTo(x, y2); g.stroke();
+  const dir = y2 > y1 ? 1 : -1;
+  g.beginPath(); g.moveTo(x - 8, y2 - dir * 12); g.lineTo(x + 8, y2 - dir * 12); g.lineTo(x, y2); g.fill();
+  text(label, x + 14, (y1 + y2) / 2 + 6, 18, C("--i"), "left");
+}
+
+// ---------- the trips every screen uses (all from the model above) ----------
+const LOOP = pidTrip(3.5, 0.1, 6, 0, 30);
+const P_ALONE = pidTrip(3, 0, 0, 0, 30);
+const P_WIND_1 = pidTrip(1, 0, 0, -0.6, 50);
+const P_WIND_3 = pidTrip(3, 0, 0, -0.6, 50);
+const PI_WIND = pidTrip(1, 0.05, 0, -0.6, 50);
+const PD = pidTrip(3, 0, 6, 0, 30);
+const TUNED = pidTrip(3.5, 0.1, 6, -0.6, 40);
+// scripted inputs for the "what does this block do with an error" screens (like the video's step graphs)
+function scripted(seconds, errorAt) {
+  const rows = [];
+  for (let n = 0; n <= seconds / DT; n++) { rows.push({ t: n * DT, e: errorAt(n * DT) }); }
+  return rows;
+}
+const STEP = scripted(12, t => { if (t >= 3 && t < 9) { return 60; } return 20; });
+const SMALL = scripted(12, t => { if (t < 6) { return 20; } return 0; });
+const BIG = scripted(12, t => { if (t < 8) { return 40; } return 0; });
+function areaUpTo(rows, t) { let a = 0; for (const r of rows) { if (r.t >= t) { break; } a += r.e * DT; } return a; }
+function ramp(slope) { return scripted(10, t => { if (t < 2) { return 10; } if (t < 7) { return 10 + slope * (t - 2); } return 10 + slope * 5; }); }
+const RAMP5 = ramp(5), RAMP8 = ramp(8);
+function slopeAt(t, slope) { if (t >= 2 && t < 7) { return slope; } return 0; }
+
+// ---------- the screens: one per image of the video ----------
+const SCREENS = [
+  { title: "the loop", cap: "error = setpoint − heading, every 0.1 s, forever", dur: 30, speed: 2, draw(t) {
+      const r = at(LOOP, t);
+      const box = (x, y, w, h, top, ours, val, col) => {
+        g.strokeStyle = col || C("--say"); g.lineWidth = 2; g.strokeRect(x, y, w, h);
+        text(top, x + w / 2, y + 24, 15, C("--dim"), "center", false);
+        text(ours, x + w / 2, y + 48, 17, col || C("--text"));
+        if (val) { text(val, x + w / 2, y + 74, 18, C("--text")); }
+      };
+      const arrow = (x1, y1, x2, y2, label) => {
+        g.strokeStyle = C("--dim"); g.fillStyle = C("--dim"); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+        const a = Math.atan2(y2 - y1, x2 - x1);
+        g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - 12 * Math.cos(a - 0.4), y2 - 12 * Math.sin(a - 0.4)); g.lineTo(x2 - 12 * Math.cos(a + 0.4), y2 - 12 * Math.sin(a + 0.4)); g.fill();
+        const f = (t * 0.8) % 1;                                    // a dot that travels along the arrow
+        g.fillStyle = C("--goal"); g.beginPath(); g.arc(x1 + (x2 - x1) * f, y1 + (y2 - y1) * f, 4, 0, 7); g.fill();
+        if (label) { text(label, (x1 + x2) / 2, (y1 + y2) / 2 - 10, 14, C("--say"), "center", false); }
+      };
+      text("setpoint", 50, 70, 15, C("--dim"), "left", false); text("90°", 50, 98, 22, C("--goal"), "left");
+      arrow(110, 120, 150, 120);
+      g.strokeStyle = C("--text"); g.lineWidth = 2; g.beginPath(); g.arc(168, 120, 18, 0, 7); g.stroke(); text("±", 168, 127, 18, C("--text"));
+      arrow(186, 120, 240, 120);
+      text("error", 213, 160, 14, C("--err"), "center", false); text(fmt(r.error) + "°", 213, 182, 17, C("--err"));
+      box(240, 70, 210, 100, "PID", "", "", C("--p"));
+      text("P " + fmt(r.p), 270, 105, 15, C("--p"), "left"); text("I " + fmt(r.i), 270, 130, 15, C("--i"), "left"); text("D " + fmt(r.d), 270, 155, 15, C("--d"), "left");
+      arrow(450, 120, 520, 120, "output");
+      box(520, 70, 200, 100, "final control element", "rudder", fmt(r.rudder) + "°", C("--rud"));
+      arrow(720, 120, 780, 120);
+      box(780, 70, 180, 100, "process", "the boat", "", C("--boat"));
+      g.strokeStyle = C("--dim"); g.lineWidth = 2; g.beginPath(); g.moveTo(870, 170); g.lineTo(870, 300); g.stroke();
+      arrow(870, 300, 650, 300);
+      box(470, 250, 180, 100, "transmitter", "compass", fmt(r.heading) + "°", C("--turn"));
+      g.beginPath(); g.moveTo(470, 300); g.lineTo(168, 300); g.stroke();
+      arrow(168, 300, 168, 140);
+      text("process variable = heading", 185, 230, 14, C("--turn"), "left", false);
+      boat(160, 430, 70, r.heading, r.rudder);
+      text("error = 90 − " + fmt(r.heading) + " = " + fmt(r.error) + "°", 600, 440, 22, C("--err"));
+  } },
+  { title: "P = Kp × error", cap: "P copies the error's shape, made Kp times bigger (Kp = 0.5)", dur: 12, draw(t) {
+      const r = at(STEP, t);
+      graph(560, 60, 380, 150, { tMax: 12, vMin: 0, vMax: 70, now: t, label: "error", series: [{ rows: STEP, value: x => x.e, col: C("--err") }] });
+      graph(560, 300, 380, 150, { tMax: 12, vMin: 0, vMax: 35, now: t, label: "P action = rudder", series: [{ rows: STEP, value: x => 0.5 * x.e, col: C("--p") }] });
+      text("error", 150, 150, 20, C("--dim")); text(r.e + "°", 150, 200, 44, C("--err"));
+      text("× 0.5", 300, 200, 30, C("--dim"));
+      text("P", 150, 300, 20, C("--dim")); text(fmt(0.5 * r.e) + "°", 150, 350, 44, C("--p"));
+      boat(380, 380, 90, 0, 0.5 * r.e);
+      text("rudder", 380, 500, 16, C("--rud"));
+  } },
+  { title: "P alone on the boat", cap: "P alone: swings past the line, then settles (Kp = 3)", dur: 30, speed: 2, draw(t) {
+      const r = at(P_ALONE, t), over = maxOf(P_ALONE, "heading") - GOAL;
+      boat(170, 260, 140, r.heading, r.rudder);
+      const gr = graph(400, 50, 540, 390, { tMax: 30, vMin: 0, vMax: 110, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP 90°" }], series: [{ rows: P_ALONE, value: x => x.heading, col: C("--boat") }] });
+      if (t > 9) { pinkArrow(gr.X(10), gr.Y(90), gr.Y(90 + over), "+" + fmt(over) + "° too far"); }
+  } },
+  { title: "offset: P alone + wind", cap: "P alone + wind → stops short. Bigger Kp: smaller gap, never 0", dur: 50, speed: 3, draw(t) {
+      const a = at(P_WIND_1, t), b = at(P_WIND_3, t);
+      const gr = graph(80, 50, 520, 390, { tMax: 50, vMin: 0, vMax: 100, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP" }],
+        series: [{ rows: P_WIND_1, value: x => x.heading, col: C("--boat") }, { rows: P_WIND_3, value: x => x.heading, col: C("--err2") }] });
+      if (t > 30) {
+        const end1 = P_WIND_1[P_WIND_1.length - 1].heading, end3 = P_WIND_3[P_WIND_3.length - 1].heading;
+        pinkArrow(gr.X(44), gr.Y(90), gr.Y(end1), "offset " + fmt(90 - end1) + "°  (Kp 1)");
+        pinkArrow(gr.X(30), gr.Y(90), gr.Y(end3), fmt(90 - end3) + "° (Kp 3)");
+      }
+      text("why it stops short", 800, 90, 18, C("--say"));
+      text("wind ←  needs rudder", 800, 150, 17, C("--wind")); text("9°", 800, 185, 30, C("--wind"));
+      text("P = Kp × error", 800, 250, 17, C("--p"));
+      text("1 × error = 9°", 800, 290, 22, C("--p"));
+      text("→ error must stay 9°", 800, 335, 18, C("--far"));
+      text("now: error " + fmt(a.error) + "°", 800, 400, 16, C("--boat"));
+      text("rudder " + fmt(a.rudder) + "°", 800, 430, 16, C("--rud"));
+  } },
+  { title: "I = Ki × (error × time)", cap: "I adds up error × time: the area under the error", dur: 12, draw(t) {
+      const gr1 = graph(80, 60, 420, 160, { tMax: 12, vMin: 0, vMax: 50, now: t, label: "error", series: [{ rows: SMALL, value: x => x.e, col: C("--err") }, { rows: BIG, value: x => x.e, col: C("--err2") }] });
+      g.fillStyle = "rgba(91,140,255,.25)"; g.fillRect(gr1.X(0), gr1.Y(20), gr1.X(Math.min(t, 6)) - gr1.X(0), gr1.Y(0) - gr1.Y(20));
+      g.fillStyle = "rgba(79,224,176,.15)"; g.fillRect(gr1.X(0), gr1.Y(40), gr1.X(Math.min(t, 8)) - gr1.X(0), gr1.Y(20) - gr1.Y(40));
+      graph(80, 310, 420, 160, { tMax: 12, vMin: 0, vMax: 340, now: t, label: "area so far (the sum)", series: [{ rows: SMALL, value: x => areaUpTo(SMALL, x.t), col: C("--err") }, { rows: BIG, value: x => areaUpTo(BIG, x.t), col: C("--err2") }] });
+      text("20° for 6 s", 760, 130, 20, C("--err")); text("= " + fmt(areaUpTo(SMALL, t)), 760, 170, 30, C("--err"));
+      text("40° for 8 s", 760, 290, 20, C("--err2")); text("= " + fmt(areaUpTo(BIG, t)), 760, 330, 30, C("--err2"));
+      text("error gone → the sum stays", 760, 440, 16, C("--say"), "center", false);
+  } },
+  { title: "P + I on the boat, in the wind", cap: "I slowly takes over the 9° → error goes to 0 (Kp 1, Ki 0.05)", dur: 50, speed: 3, draw(t) {
+      const r = at(PI_WIND, t);
+      const gr = graph(80, 50, 480, 390, { tMax: 50, vMin: 0, vMax: 100, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP" }],
+        series: [{ rows: P_WIND_1, value: x => x.heading, col: "rgba(242,242,242,.3)" }, { rows: PI_WIND, value: x => x.heading, col: C("--i") }] });
+      text("grey = P alone", gr.X(40), gr.Y(70), 13, C("--dim"), "center", false);
+      bars(620, 120, [{ name: "P", v: r.p, col: C("--p") }, { name: "I", v: r.i, col: C("--i") }, { name: "rudder", v: r.rudder, col: C("--rud") }]);
+      text("error " + fmt(r.error) + "°", 780, 300, 26, C("--err"));
+      if (t > 40) { text("I holds the wind, P ≈ 0", 780, 360, 18, C("--i")); }
+  } },
+  { title: "D = Kd × slope", cap: "D looks at how FAST the error changes, not how big it is (Kd = 2)", dur: 10, draw(t) {
+      graph(560, 60, 380, 150, { tMax: 10, vMin: 0, vMax: 55, now: t, label: "error", series: [{ rows: RAMP5, value: x => x.e, col: C("--err") }, { rows: RAMP8, value: x => x.e, col: C("--err2") }] });
+      graph(560, 300, 380, 150, { tMax: 10, vMin: 0, vMax: 20, now: t, label: "D action", series: [{ rows: RAMP5, value: x => 2 * slopeAt(x.t, 5), col: C("--err") }, { rows: RAMP8, value: x => 2 * slopeAt(x.t, 8), col: C("--err2") }] });
+      text("slope 5°/s", 200, 150, 20, C("--err")); text("D = 2 × 5 = " + 2 * slopeAt(t, 5), 200, 190, 24, C("--err"));
+      text("slope 8°/s", 200, 290, 20, C("--err2")); text("D = 2 × 8 = " + 2 * slopeAt(t, 8), 200, 330, 24, C("--err2"));
+      text("on our boat: slope of error = −turn", 280, 450, 17, C("--turn"));
+  } },
+  { title: "D on the boat = the brake", cap: "D pulls the rudder back early → no swing past the line", dur: 30, speed: 2, draw(t) {
+      const a = at(P_ALONE, t), b = at(PD, t);
+      boat(130, 150, 85, a.heading, a.rudder); text("P alone", 130, 265, 16, C("--boat"));
+      boat(130, 390, 85, b.heading, b.rudder, C("--d")); text("P + D", 130, 500, 16, C("--d"));
+      const gr = graph(320, 50, 400, 390, { tMax: 30, vMin: 0, vMax: 110, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP" }],
+        series: [{ rows: P_ALONE, value: x => x.heading, col: C("--boat") }, { rows: PD, value: x => x.heading, col: C("--d") }] });
+      bars(740, 150, [{ name: "P", v: b.p, col: C("--p") }, { name: "D", v: b.d, col: C("--d") }, { name: "rudder", v: b.rudder, col: C("--rud") }]);
+      text("P + D boat", 900, 125, 14, C("--d"));
+      if (t > 15) {
+        text("P alone: +" + fmt(maxOf(P_ALONE, "heading") - 90) + "°", 860, 330, 18, C("--boat"));
+        text("P + D: +" + fmt(maxOf(PD, "heading") - 90) + "°", 860, 365, 18, C("--d"));
+      }
+  } },
+  { title: "tuning: all three", cap: "tuning = picking Kp, Ki, Kd until the curve looks like this", dur: 40, speed: 2.5, draw(t) {
+      const r = at(TUNED, t);
+      boat(150, 260, 120, r.heading, r.rudder);
+      text("wind on", 150, 420, 15, C("--wind"));
+      graph(330, 50, 360, 390, { tMax: 40, vMin: 0, vMax: 110, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP" }], series: [{ rows: TUNED, value: x => x.heading, col: C("--turn") }] });
+      bars(700, 150, [{ name: "P", v: r.p, col: C("--p") }, { name: "I", v: r.i, col: C("--i") }, { name: "D", v: r.d, col: C("--d") }, { name: "rudder", v: r.rudder, col: C("--rud") }]);
+      text("Kp 3.5 · Ki 0.1 · Kd 6", 850, 380, 15, C("--say"), "center", false);
+      text("error " + fmt(r.error) + "°", 850, 420, 22, C("--err"));
+  } },
+];
+
+// ---------- player ----------
+let idx = 0, t0 = performance.now(), paused = false, pausedAt = 0;
+const dots = document.getElementById("dots");
+dots.innerHTML = SCREENS.map((_, i) => `<div class="dot" data-i="${i}"></div>`).join("");
+dots.onclick = e => { if (e.target.dataset.i) { show(+e.target.dataset.i); } };
+function show(i) {
+  idx = (i + SCREENS.length) % SCREENS.length; t0 = performance.now(); pausedAt = 0;
+  document.getElementById("title").textContent = (idx + 1) + " · " + SCREENS[idx].title;
+  document.getElementById("cap").textContent = SCREENS[idx].cap;
+  [...dots.children].forEach((d, k) => d.classList.toggle("on", k === idx));
+}
+document.getElementById("prev").onclick = () => show(idx - 1);
+document.getElementById("next").onclick = () => show(idx + 1);
+window.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { show(idx + 1); }
+  if (e.key === "ArrowLeft") { show(idx - 1); }
+  if (e.key === " ") { e.preventDefault(); paused = !paused; if (paused) { pausedAt = performance.now(); } else { t0 += performance.now() - pausedAt; } }
+});
+function frame(now) {
+  const r = window.devicePixelRatio || 1;
+  if (cv.width !== 1000 * r) { cv.width = 1000 * r; cv.height = 520 * r; }
+  g.setTransform(r, 0, 0, r, 0, 0);
+  const S = SCREENS[idx], speed = S.speed || 1, clock = paused ? pausedAt : now;
+  const loop = S.dur / speed + 3;
+  const t = Math.min(S.dur, (((clock - t0) / 1000) % loop) * speed);
+  g.clearRect(0, 0, 1000, 520);
+  S.draw(t);
+  requestAnimationFrame(frame);
+}
+show(0);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
