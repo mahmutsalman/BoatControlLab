@@ -185,9 +185,22 @@ const SCREENS = [
       g.strokeStyle = C("--text"); g.lineWidth = 2; g.beginPath(); g.arc(168, 120, 18, 0, 7); g.stroke(); text("±", 168, 127, 18, C("--text"));
       arrow(186, 120, 240, 120);
       text("error", 213, 160, 14, C("--err"), "center", false); text(fmt(r.error) + "°", 213, 182, 17, C("--err"));
-      box(240, 70, 210, 100, "PID", "", "", C("--p"));
-      text("P " + fmt(r.p), 270, 105, 15, C("--p"), "left"); text("I " + fmt(r.i), 270, 130, 15, C("--i"), "left"); text("D " + fmt(r.d), 270, 155, 15, C("--d"), "left");
+      // the PID box: its three parts, and their sum = the output (the rudder angle it orders)
+      const order = r.p + r.i + r.d;
+      g.strokeStyle = C("--p"); g.lineWidth = 2; g.strokeRect(240, 70, 210, 100);
+      text("PID", 345, 66, 13, C("--dim"), "center", false);
+      text("P " + fmt(r.p), 256, 98, 15, C("--p"), "left");
+      text("I " + fmt(r.i), 256, 124, 15, C("--i"), "left");
+      text("D " + fmt(r.d), 256, 150, 15, C("--d"), "left");
+      text("sum", 400, 108, 13, C("--dim"), "center", false);
+      text(fmt(order), 400, 134, 20, C("--text"));
       arrow(450, 120, 520, 120, "output");
+      if (Math.abs(order) > LIMIT) {
+        text(fmt(order) + "°", 485, 145, 15, C("--far"));
+        text("> limit", 485, 163, 12, C("--far"), "center", false);
+      } else {
+        text(fmt(order) + "°", 485, 145, 15, C("--text"));
+      }
       box(520, 70, 200, 100, "final control element", "rudder", fmt(r.rudder) + "°", C("--rud"));
       arrow(720, 120, 780, 120);
       box(780, 70, 180, 100, "process", "the boat", "", C("--boat"));
