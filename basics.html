@@ -13,7 +13,7 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px "IBM Plex Mono",m
 .top{display:flex;gap:10px;align-items:center;margin-bottom:10px}
 .dot{width:12px;height:12px;border-radius:50%;background:var(--line);cursor:pointer}
 .dot.on{background:var(--text)}
-button{font:inherit;background:var(--line);color:var(--text);border:0;border-radius:8px;padding:6px 14px;cursor:pointer}
+button,a.btn{text-decoration:none;font:inherit;background:var(--line);color:var(--text);border:0;border-radius:8px;padding:6px 14px;cursor:pointer}
 h1{font-size:30px;margin:6px 0 4px}
 canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display:block}
 .cap{font-size:22px;color:var(--say);margin:14px 0 4px;text-align:center}
@@ -21,7 +21,7 @@ canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display
 </style>
 </head>
 <body>
-<div class="top"><button id="prev">←</button><div id="dots" style="display:flex;gap:8px"></div><button id="next">→</button></div>
+<div class="top"><a class="btn" href="index.html">⌂</a><button id="prev">←</button><div id="dots" style="display:flex;gap:8px"></div><button id="next">→</button></div>
 <h1 id="title"></h1>
 <canvas id="cv" width="1000" height="520"></canvas>
 <div class="cap" id="cap"></div>
