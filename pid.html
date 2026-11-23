@@ -130,6 +130,20 @@ const P_WIND_3 = pidTrip(3, 0, 0, -0.6, 50);
 const PI_WIND = pidTrip(1, 0.05, 0, -0.6, 50);
 const PD = pidTrip(3, 0, 6, 0, 30);
 const TUNED = pidTrip(3.5, 0.1, 6, -0.6, 40);
+// the "what the order means" boats: start somewhere, hold ONE rudder order, watch which way the nose goes
+function holdRudder(startHeading, rudder, seconds) {
+  let heading = startHeading, turn = 0;
+  const rows = [];
+  for (let n = 0; n <= seconds / DT; n++) {
+    rows.push({ t: n * DT, heading, rudder });
+    turn = turn + DT * ((KB * rudder - turn) / T);
+    heading = heading + DT * turn;
+  }
+  return rows;
+}
+const ORDER_RIGHT = holdRudder(60, 35, 8);
+const ORDER_LEFT = holdRudder(100, -35, 8);
+const ORDER_HOLD = holdRudder(90.8, 0, 8);
 // scripted inputs for the "what does this block do with an error" screens (like the video's step graphs)
 function scripted(seconds, errorAt) {
   const rows = [];
@@ -182,6 +196,73 @@ const SCREENS = [
       text("process variable = heading", 185, 230, 14, C("--turn"), "left", false);
       boat(160, 430, 70, r.heading, r.rudder);
       text("error = 90 − " + fmt(r.heading) + " = " + fmt(r.error) + "°", 600, 440, 22, C("--err"));
+  } },
+  { title: "the parts, one by one", cap: "each box has ONE job", dur: 21, draw(t) {
+      // the same loop, frozen at one moment (heading 90.8°), one part lit every 3 s
+      const PARTS = [
+        { box: [40, 60, 100, 70], role: "the GOAL", job: "the course we want", ex: "90° = point east", col: C("--goal") },
+        { box: [146, 98, 44, 44], role: "the COMPARE", job: "goal − where we are", ex: "90 − 90.8 = −0.8°", col: C("--err") },
+        { box: [240, 70, 210, 100], role: "the BRAIN", job: "gets only the error, decides", ex: "P −2.8 + I 2.6 + D 0.2 = 0.0", col: C("--p") },
+        { box: [452, 92, 66, 40], role: "the ORDER", job: "just a number: rudder to …°", ex: "0.0° → go straight", col: C("--text") },
+        { box: [520, 70, 200, 100], role: "the MUSCLE", job: "moves the rudder (max ±35°)", ex: "blade at 0.0°", col: C("--rud") },
+        { box: [780, 70, 180, 100], role: "the THING we control", job: "turns slowly, the sea pushes it", ex: "its heading changes", col: C("--boat") },
+        { box: [470, 250, 180, 100], role: "the EYES", job: "measures the heading, sends it back", ex: "90.8°", col: C("--turn") },
+      ];
+      const k = Math.min(PARTS.length - 1, Math.floor(t / 3));
+      const box = (x, y, w, h, top, ours, val, col) => {
+        g.strokeStyle = col; g.lineWidth = 2; g.strokeRect(x, y, w, h);
+        text(top, x + w / 2, y + 24, 15, C("--dim"), "center", false);
+        text(ours, x + w / 2, y + 48, 17, col);
+        if (val) { text(val, x + w / 2, y + 74, 18, C("--text")); }
+      };
+      const line = (pts) => { g.strokeStyle = C("--dim"); g.lineWidth = 2; g.beginPath(); pts.forEach(([x, y], n) => { if (n) { g.lineTo(x, y); } else { g.moveTo(x, y); } }); g.stroke(); };
+      // the whole loop, dimmed
+      g.globalAlpha = 0.3;
+      text("setpoint", 50, 85, 15, C("--dim"), "left", false); text("90°", 50, 113, 22, C("--goal"), "left");
+      line([[110, 120], [150, 120]]);
+      g.strokeStyle = C("--text"); g.lineWidth = 2; g.beginPath(); g.arc(168, 120, 18, 0, 7); g.stroke(); text("±", 168, 127, 18, C("--text"));
+      line([[186, 120], [240, 120]]);
+      box(240, 70, 210, 100, "PID", "", "", C("--p"));
+      text("P −2.8   I 2.6   D 0.2", 345, 130, 14, C("--text"));
+      line([[450, 120], [520, 120]]); text("output", 485, 110, 13, C("--say"), "center", false);
+      box(520, 70, 200, 100, "final control element", "rudder", "0.0°", C("--rud"));
+      line([[720, 120], [780, 120]]);
+      box(780, 70, 180, 100, "process", "the boat", "", C("--boat"));
+      line([[870, 170], [870, 300], [650, 300]]);
+      box(470, 250, 180, 100, "transmitter", "compass", "90.8°", C("--turn"));
+      line([[470, 300], [168, 300], [168, 140]]);
+      g.globalAlpha = 1;
+      // the lit part
+      const P = PARTS[k], [bx, by, bw, bh] = P.box;
+      g.strokeStyle = P.col; g.lineWidth = 4; g.strokeRect(bx - 6, by - 6, bw + 12, bh + 12);
+      if (k === 0) { text("setpoint", 50, 85, 15, C("--dim"), "left", false); text("90°", 50, 113, 22, C("--goal"), "left"); }
+      if (k === 1) { g.strokeStyle = C("--text"); g.lineWidth = 2; g.beginPath(); g.arc(168, 120, 18, 0, 7); g.stroke(); text("±", 168, 127, 18, C("--text")); }
+      if (k === 2) { box(240, 70, 210, 100, "PID", "", "", C("--p")); text("P −2.8   I 2.6   D 0.2", 345, 130, 14, C("--text")); }
+      if (k === 3) { text("output", 485, 110, 13, C("--text")); text("0.0°", 485, 128, 13, C("--text")); }
+      if (k === 4) { box(520, 70, 200, 100, "final control element", "rudder", "0.0°", C("--rud")); }
+      if (k === 5) { box(780, 70, 180, 100, "process", "the boat", "", C("--boat")); }
+      if (k === 6) { box(470, 250, 180, 100, "transmitter", "compass", "90.8°", C("--turn")); }
+      // the explanation of the lit part, big
+      text((k + 1) + " / 7", 80, 420, 16, C("--dim"));
+      text(P.role, 500, 410, 30, P.col);
+      text(P.job, 500, 450, 20, C("--say"), "center", false);
+      text(P.ex, 500, 490, 22, C("--text"));
+  } },
+  { title: "what the order means", cap: "sign = which way · size = how hard (Kp = 3.5)", dur: 8, draw(t) {
+      const cols = [
+        { trip: ORDER_RIGHT, err: "+30°", calc: "P = 3.5 × 30 = 105", out: "limit → +35°", say: "+ → turn RIGHT, hard", col: C("--goal") },
+        { trip: ORDER_LEFT, err: "−10°", calc: "P = 3.5 × −10 = −35", out: "−35°", say: "− → turn LEFT, hard", col: C("--far") },
+        { trip: ORDER_HOLD, err: "−0.8°", calc: "−2.8 + 2.6 + 0.2 = 0.0", out: "0.0°", say: "0 → go STRAIGHT", col: C("--turn") },
+      ];
+      cols.forEach((c, n) => {
+        const cx = 170 + n * 330, r = at(c.trip, t);
+        boat(cx, 160, 105, r.heading, r.rudder);
+        text("error " + c.err, cx, 305, 20, C("--err"));
+        text(c.calc, cx, 340, 16, C("--p"));
+        text("rudder " + c.out, cx, 375, 20, C("--rud"));
+        text(c.say, cx, 420, 20, c.col);
+        text("heading " + fmt(r.heading) + "°", cx, 470, 16, C("--boat"), "center", false);
+      });
   } },
   { title: "P = Kp × error", cap: "P copies the error's shape, made Kp times bigger (Kp = 0.5)", dur: 12, draw(t) {
       const r = at(STEP, t);
