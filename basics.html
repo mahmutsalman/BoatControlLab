@@ -232,6 +232,7 @@ function fitCanvas() {
   g.setTransform(r, 0, 0, r, 0, 0);
 }
 function frame(now) {
+  requestAnimationFrame(frame);
   fitCanvas();
   const L = LESSONS[idx], speed = L.speed || 1;
   const clock = paused ? pausedAt : now;
@@ -239,8 +240,13 @@ function frame(now) {
   const real = ((clock - t0) / 1000) % loop;
   const t = Math.min(L.dur, real * speed);
   g.clearRect(0, 0, 1000, 520);
-  L.draw(t);
-  requestAnimationFrame(frame);
+  try {
+    L.draw(t);
+  } catch (err) {                                   // never let one screen freeze the whole lesson
+    g.setTransform(1, 0, 0, 1, 0, 0); g.font = "600 18px IBM Plex Mono"; g.fillStyle = "#ef5f6b"; g.textAlign = "left";
+    g.fillText("screen error: " + err.message, 20, 40);
+    console.error(err);
+  }
 }
 show(0);
 requestAnimationFrame(frame);

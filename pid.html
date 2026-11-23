@@ -284,6 +284,7 @@ window.addEventListener("keydown", e => {
   if (e.key === " ") { e.preventDefault(); paused = !paused; if (paused) { pausedAt = performance.now(); } else { t0 += performance.now() - pausedAt; } }
 });
 function frame(now) {
+  requestAnimationFrame(frame);
   const r = window.devicePixelRatio || 1;
   if (cv.width !== 1000 * r) { cv.width = 1000 * r; cv.height = 520 * r; }
   g.setTransform(r, 0, 0, r, 0, 0);
@@ -291,8 +292,13 @@ function frame(now) {
   const loop = S.dur / speed + 3;
   const t = Math.min(S.dur, (((clock - t0) / 1000) % loop) * speed);
   g.clearRect(0, 0, 1000, 520);
-  S.draw(t);
-  requestAnimationFrame(frame);
+  try {
+    S.draw(t);
+  } catch (err) {                                   // never let one screen freeze the whole lesson
+    g.setTransform(1, 0, 0, 1, 0, 0); g.font = "600 18px IBM Plex Mono"; g.fillStyle = "#ef5f6b"; g.textAlign = "left";
+    g.fillText("screen error: " + err.message, 20, 40);
+    console.error(err);
+  }
 }
 show(0);
 requestAnimationFrame(frame);
