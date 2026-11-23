@@ -195,7 +195,7 @@ const LESSONS = [
       miniGraph(420, 270, 540, 210, LAG, "turn", t, 15, 4.5, C("--turn"), "turn (°/s)",
         [{ t: 3, v: LAG[30].turn, label: "after 3 s: " + fmt(LAG[30].turn) + "°/s" }, { t: 14.9, v: LAG[149].turn, label: fmt(LAG[149].turn) + "°/s" }]);
   } },
-  { title: "the trap", cap: "rudder back to 0 AT the line → too late", dur: 26, speed: 2, draw(t) {
+  { title: "the trap", cap: "a hand rule, not P: rudder 0 AT the line → too late", dur: 26, speed: 2, draw(t) {
       const p = at(LATE, t), cx = 330, cy = 260, R = 190;
       ring(cx, cy, R); goalLine(cx, cy, R, 90);
       if (p.heading > 90) { gapArc(cx, cy, 120, 90, p.heading, C("--far")); } else { gapArc(cx, cy, 120, p.heading, 90, C("--togo")); }
@@ -206,6 +206,9 @@ const LESSONS = [
       if (p.heading > 90.5) { text(fmt(p.heading - 90) + "° too far", 760, 340, 32, C("--far")); }
       const max = Math.max(...LATE.map(r => r.heading));
       if (t > 22) { text("stopped at " + fmt(max) + "°", 760, 400, 22, C("--far")); }
+      text("no controller: a hand rule", 760, 455, 16, C("--dim"));
+      text("35° until the line, then 0 forever", 760, 480, 15, C("--say"), "center", false);
+      text("nobody steers back", 760, 505, 15, C("--say"), "center", false);
   } },
   { title: "brake early", cap: "rudder back BEFORE the line → stops on it", dur: 26, speed: 2, draw(t) {
       const p = at(EARLY, t), cx = 330, cy = 260, R = 190;
@@ -220,6 +223,8 @@ const LESSONS = [
       text("turn " + fmt(p.turn) + "°/s", 760, 250, 24, C("--turn"));
       if (p.rudder === 0 && p.heading < 89.5) { text("rudder 0 at 70°", 760, 340, 24, C("--rud")); text("still swinging…", 760, 380, 20, C("--say"), "center", false); }
       if (t > 22) { const max = Math.max(...EARLY.map(r => r.heading)); text("stopped at " + fmt(max) + "° ✓", 760, 400, 26, C("--goal")); }
+      text("no controller: a hand rule", 760, 455, 16, C("--dim"));
+      text("35° until 70°, then 0 forever", 760, 480, 15, C("--say"), "center", false);
   } },
 ];
 
