@@ -429,10 +429,28 @@ const SCREENS = [
   } },
   { title: "I = Ki × (error × time)", cap: "while the error stays, the sum grows → I pushes harder (Kp 1, Ki 0.1, wind)", dur: 40, speed: 2.5, draw(t) {
       const r = at(I_WIND, t);
-      graph(80, 50, 430, 170, { tMax: 40, vMin: -4, vMax: 10, now: t, label: "error (°)", ticks: [0, 5, 10], xStep: 10,
+      const ge = graph(80, 50, 430, 170, { tMax: 40, vMin: -4, vMax: 10, now: t, label: "error (°): one bar per second = what it ADDS", ticks: [0, 5, 10], xStep: 10,
         series: [{ rows: I_WIND, value: x => x.error, col: C("--err") }] });
-      graph(80, 300, 430, 170, { tMax: 40, vMin: 0, vMax: 100, now: t, label: "sum = area so far (°·s)", ticks: [0, 50, 100], xStep: 10,
+      // the area as bars: each second's bar has exactly the area that second adds to the sum (height = its average error)
+      const sumAt = sec => I_WIND[Math.min(I_WIND.length - 1, Math.round(sec / DT))].sum;
+      const nowSec = Math.floor(t);
+      for (let sec = 0; sec <= nowSec && sec < 40; sec++) {
+        const end = Math.min(sec + 1, t);
+        if (end <= sec) { continue; }
+        const added = sumAt(end) - sumAt(sec), height = added / (end - sec);
+        let fill = "rgba(91,140,255,.30)";
+        if (added < 0) { fill = "rgba(239,95,107,.40)"; }
+        if (sec === nowSec) { fill = added < 0 ? "rgba(239,95,107,.75)" : "rgba(91,140,255,.75)"; }
+        g.fillStyle = fill;
+        g.fillRect(ge.X(sec) + 0.5, Math.min(ge.Y(0), ge.Y(height)), ge.X(end) - ge.X(sec) - 1, Math.abs(ge.Y(height) - ge.Y(0)));
+      }
+      const gs = graph(80, 300, 430, 170, { tMax: 40, vMin: 0, vMax: 110, now: t, label: "sum = all the bars added up (°·s)", ticks: [0, 50, 100], xStep: 10,
         series: [{ rows: I_WIND, value: x => x.sum, col: C("--i") }] });
+      const thisSecond = sumAt(Math.min(t, 40)) - sumAt(nowSec);
+      const lastFull = nowSec >= 1 ? sumAt(nowSec) - sumAt(nowSec - 1) : 0;
+      let sign = "+";
+      if (lastFull < 0) { sign = ""; }
+      if (nowSec >= 1) { text("last second added " + sign + fmt(lastFull) + " to the sum", 760, 428, 15, lastFull < 0 ? C("--far") : C("--err")); }
       boat(760, 145, 95, r.heading, r.rudder);
       text("wind ←", 760, 32, 15, C("--wind"));
       text("error " + fmt(r.error) + "°", 760, 285, 18, C("--err"));
@@ -440,8 +458,8 @@ const SCREENS = [
       text("I = 0.1 × " + fmt(r.sum) + " = " + fmt(r.i), 760, 341, 18, C("--i"));
       text("P = 1 × " + fmt(r.error) + " = " + fmt(r.p), 760, 369, 17, C("--p"));
       text("rudder = P + I = " + fmt(r.rudder) + "°", 760, 397, 18, C("--rud"));
-      if (t > 25) { text("error ≈ 0 → the sum stops growing", 760, 440, 15, C("--say"), "center", false); text("I ≈ 9 holds the wind by itself", 760, 466, 15, C("--i")); }
-      else if (r.error > 1) { text("error > 0 → the sum keeps growing", 760, 440, 15, C("--say"), "center", false); }
+      if (t > 25) { text("error ≈ 0 → the sum stops growing", 760, 462, 15, C("--say"), "center", false); text("I ≈ 9 holds the wind by itself", 760, 488, 15, C("--i")); }
+      else if (r.error > 1) { text("error > 0 → the sum keeps growing", 760, 462, 15, C("--say"), "center", false); }
   } },
   { title: "P + I on the boat, in the wind", cap: "I slowly takes over the 9° → error goes to 0 (Kp 1, Ki 0.05)", dur: 50, speed: 3, draw(t) {
       const r = at(PI_WIND, t);
