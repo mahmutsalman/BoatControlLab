@@ -234,7 +234,7 @@ const dots = document.getElementById("dots");
 dots.innerHTML = LESSONS.map((_, i) => `<div class="dot" data-i="${i}"></div>`).join("");
 dots.onclick = e => { if (e.target.dataset.i) { show(+e.target.dataset.i); } };
 function show(i) {
-  idx = (i + LESSONS.length) % LESSONS.length; t0 = performance.now(); pausedAt = 0;
+  idx = (i + LESSONS.length) % LESSONS.length; t0 = performance.now(); pausedAt = t0;
   document.getElementById("title").textContent = (idx + 1) + " · " + LESSONS[idx].title;
   document.getElementById("cap").textContent = LESSONS[idx].cap;
   [...dots.children].forEach((d, k) => d.classList.toggle("on", k === idx));
@@ -257,7 +257,7 @@ function frame(now) {
   const L = LESSONS[idx], speed = L.speed || 1;
   const clock = paused ? pausedAt : now;
   const loop = L.dur / speed + 2;                         // play, then hold the end 2 s, then loop
-  const real = ((clock - t0) / 1000) % loop;
+  const real = Math.max(0, (clock - t0) / 1000) % loop;   // a frame's timestamp can be a little EARLIER than the click that set t0
   const t = Math.min(L.dur, real * speed);
   g.clearRect(0, 0, 1000, 520);
   try {

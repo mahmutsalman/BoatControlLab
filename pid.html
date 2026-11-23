@@ -417,7 +417,7 @@ const dots = document.getElementById("dots");
 dots.innerHTML = SCREENS.map((_, i) => `<div class="dot" data-i="${i}"></div>`).join("");
 dots.onclick = e => { if (e.target.dataset.i) { show(+e.target.dataset.i); } };
 function show(i) {
-  idx = (i + SCREENS.length) % SCREENS.length; t0 = performance.now(); pausedAt = 0;
+  idx = (i + SCREENS.length) % SCREENS.length; t0 = performance.now(); pausedAt = t0;
   document.getElementById("title").textContent = (idx + 1) + " · " + SCREENS[idx].title;
   document.getElementById("cap").textContent = SCREENS[idx].cap;
   [...dots.children].forEach((d, k) => d.classList.toggle("on", k === idx));
@@ -436,7 +436,8 @@ function frame(now) {
   g.setTransform(r, 0, 0, r, 0, 0);
   const S = SCREENS[idx], speed = S.speed || 1, clock = paused ? pausedAt : now;
   const loop = S.dur / speed + 3;
-  const t = Math.min(S.dur, (((clock - t0) / 1000) % loop) * speed);
+  const elapsed = Math.max(0, (clock - t0) / 1000);   // a frame's timestamp can be a little EARLIER than the click that set t0
+  const t = Math.min(S.dur, (elapsed % loop) * speed);
   g.clearRect(0, 0, 1000, 520);
   try {
     S.draw(t);
