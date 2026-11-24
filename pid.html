@@ -195,6 +195,8 @@ const P_ALONE = pidTrip(3, 0, 0, 0, 30);
 const P_WIND_1 = pidTrip(1, 0, 0, -0.6, 50);
 const P_WIND_3 = pidTrip(3, 0, 0, -0.6, 50);
 const PI_WIND = pidTrip(1, 0.05, 0, -0.6, 50);
+const P_CALM_1 = pidTrip(1, 0, 0, 0, 50);       // no wind, P alone (Kp 1)
+const PI_CALM = pidTrip(1, 0.05, 0, 0, 50);      // no wind, P + I (the same Kp 1, Ki 0.05 as the wind screen)
 const PD = pidTrip(3, 0, 6, 0, 30);
 const TUNED = pidTrip(3.5, 0.1, 6, -0.6, 40);
 const SIDE_0 = pidTrip(3, 0, 0, 0, 36);
@@ -473,6 +475,20 @@ const SCREENS = [
       text("error " + fmt(r.error) + "°", 780, 300, 26, C("--err"));
       if (t > 40) { text("I holds the wind, P ≈ 0", 780, 360, 18, C("--i")); }
   } },
+  { title: "P + I on the boat, NO wind", cap: "no wind: P alone already reaches 90° → I has nothing to hold, it only adds a swing (Kp 1, Ki 0.05)", dur: 50, speed: 3, draw(t) {
+      const r = at(PI_CALM, t), q = at(P_CALM_1, t);
+      const gr = graph(80, 50, 480, 390, { tMax: 50, vMin: 0, vMax: 110, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP" }],
+        series: [{ rows: P_CALM_1, value: x => x.heading, col: "rgba(242,242,242,.3)" }, { rows: PI_CALM, value: x => x.heading, col: C("--i") }] });
+      text("grey = P alone", gr.X(40), gr.Y(70), 13, C("--dim"), "center", false);
+      bars(620, 120, [{ name: "P", v: r.p, col: C("--p") }, { name: "I", v: r.i, col: C("--i") }, { name: "rudder", v: r.rudder, col: C("--rud") }]);
+      text("error " + fmt(r.error) + "°", 780, 300, 26, C("--err"));
+      if (t > 18) {
+        text("highest: P alone " + fmt(maxOf(P_CALM_1, "heading")) + "°", 780, 350, 16, C("--dim"));
+        text("P + I " + fmt(maxOf(PI_CALM, "heading")) + "°: the sum pushes past", 780, 378, 16, C("--i"));
+      }
+      if (t > 40) { text("end: I = " + fmt(r.i) + "° → nothing to hold", 780, 420, 17, C("--i")); }
+      else if (t < 18) { text("short of 90 → the sum grows, I adds rudder", 780, 420, 15, C("--say"), "center", false); }
+  } },
   { title: "D = Kd × slope", cap: "a gust starts a swing: D brakes it, but does NOT bring the boat back (Kd 6)", dur: 20, speed: 1.5, draw(t) {
       const a = at(GUST_NONE, t), b = at(GUST_D, t);
       boat(110, 130, 80, a.heading, a.rudder); text("no controller", 110, 235, 15, C("--boat"));
@@ -566,6 +582,7 @@ const FORMULAS = {
   "offset: P alone + wind": ["P = Kp · e(t) → steady-state error (offset)", "the wind needs 9° rudder · 9 = X × error → error must stay 9 / X"],
   "I without wind": ["I = Ki · ∫ e(t) dt", "every 0.1 s: sum = sum + error × 0.1 · I = Y × sum (Y = 0.1)"],
   "I = Ki × (error × time)": ["I = Ki · ∫ e(t) dt", "every 0.1 s: sum = sum + error × 0.1 · I = Y × sum · rudder = clamp(X·error + I, −35, +35)"],
+  "P + I on the boat, NO wind": ["u = Kp · e + Ki · ∫ e dt", "rudder = clamp(X × error + Y × sum, −35, +35) · X = 1, Y = 0.05 · no wind: P alone ends at 90°, so I is only extra push"],
   "P + I on the boat, in the wind": ["u = Kp · e + Ki · ∫ e dt", "rudder = clamp(X × error + Y × sum, −35, +35) · X = 1, Y = 0.05"],
   "D = Kd × slope": ["D = Kd · de(t)/dt", "D = Z × how fast the error changes = Z × (−turn) · Z = 6"],
   "D on the boat = the brake": ["u = Kp · e + Kd · de/dt", "rudder = clamp(X × error + Z × (−turn), −35, +35) · X = 3, Z = 6"],
