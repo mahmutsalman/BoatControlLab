@@ -513,8 +513,14 @@ const SCREENS = [
       const a = at(P_ALONE, t), b = at(PD, t);
       boat(130, 150, 85, a.heading, a.rudder); text("P alone", 130, 265, 16, C("--boat"));
       boat(130, 390, 85, b.heading, b.rudder, C("--d")); text("P + D", 130, 500, 16, C("--d"));
-      const gr = graph(320, 50, 400, 390, { tMax: 30, vMin: 0, vMax: 110, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP" }],
+      const gr = graph(320, 40, 400, 200, { tMax: 30, vMin: 0, vMax: 110, now: t, label: "heading", lines: [{ v: 90, col: C("--goal"), label: "SP" }],
         series: [{ rows: P_ALONE, value: x => x.heading, col: C("--boat") }, { rows: PD, value: x => x.heading, col: C("--d") }] });
+      // the ERROR graph under it (his ask 2026-11-24): error = 90 − heading · below 0 = past the line
+      graph(320, 300, 400, 170, { tMax: 30, vMin: -15, vMax: 90, now: t, label: "error = 90 − heading", ticks: [0, 45, 90], xStep: 10,
+        lines: [{ v: 0, col: C("--goal"), label: "" }],
+        series: [{ rows: P_ALONE, value: x => x.error, col: C("--boat") }, { rows: PD, value: x => x.error, col: C("--d") }] });
+      text("error now: P alone " + fmt(a.error) + "° · P + D " + fmt(b.error) + "°", 860, 430, 14, C("--err"));
+      if (a.error < -0.3) { text("P alone: error < 0 = past the line", 860, 455, 14, C("--boat")); }
       bars(740, 150, [{ name: "P", v: b.p, col: C("--p") }, { name: "D", v: b.d, col: C("--d") }, { name: "rudder", v: b.rudder, col: C("--rud") }]);
       text("P + D boat", 900, 125, 14, C("--d"));
       if (t > 15) {
