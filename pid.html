@@ -195,6 +195,7 @@ const P_ALONE = pidTrip(3, 0, 0, 0, 30);
 const P_WIND_1 = pidTrip(1, 0, 0, -0.6, 50);
 const P_WIND_3 = pidTrip(3, 0, 0, -0.6, 50);
 const PI_WIND = pidTrip(1, 0.05, 0, -0.6, 50);
+const KP_05 = pidTrip(0.5, 0, 0, 0, 40), KP_1 = pidTrip(1, 0, 0, 0, 40), KP_35 = pidTrip(3.5, 0, 0, 0, 40);   // where Kp comes from: the same boat, three choices
 const P_CALM_1 = pidTrip(1, 0, 0, 0, 50);       // no wind, P alone (Kp 1)
 const PI_CALM = pidTrip(1, 0.05, 0, 0, 50);      // no wind, P + I (the same Kp 1, Ki 0.05 as the wind screen)
 const PD = pidTrip(3, 0, 6, 0, 30);
@@ -364,6 +365,37 @@ const SCREENS = [
         text(c.say, cx, 420, 20, c.col);
         text("heading " + fmt(r.heading) + "°", cx, 470, 16, C("--boat"), "center", false);
       });
+      text("Kp = 3.5 is a CHOICE: \"full rudder (35°) when 10° wrong\" → 35 ÷ 10 = 3.5 · next screen: where it comes from", 500, 508, 14, C("--say"), "center", false);
+  } },
+  { title: "where does Kp come from?", cap: "Kp is a knob WE choose: small = slow and calm · big = fast, swings past · picking it = tuning", dur: 40, speed: 2.5, draw(t) {
+      // left: the rule "full rudder at E° wrong" → Kp = 35 ÷ E (rudder vs error, clamped at 35)
+      const x0 = 60, y0 = 420, w = 360, h = 300, eMax = 80;
+      const X = e => x0 + e / eMax * w, Y = r => y0 - r / 40 * h;
+      g.strokeStyle = C("--dim"); g.lineWidth = 2; g.beginPath(); g.moveTo(x0, y0 - h - 8); g.lineTo(x0, y0); g.lineTo(x0 + w + 8, y0); g.stroke();
+      text("rudder °", x0 - 10, y0 - h - 16, 14, C("--dim"), "left");
+      text("error ° (how wrong)", x0 + w, y0 + 36, 13, C("--dim"), "right", false);
+      for (const e of [0, 10, 20, 35, 50, 70]) { text(String(e), X(e), y0 + 18, 12, C("--dim"), "center", false); }
+      for (const r of [0, 35]) { text(String(r), x0 - 8, Y(r) + 4, 12, C("--dim"), "right", false); }
+      g.setLineDash([6, 5]); g.strokeStyle = C("--rud"); g.lineWidth = 1.5; g.beginPath(); g.moveTo(x0, Y(35)); g.lineTo(x0 + w, Y(35)); g.stroke(); g.setLineDash([]);
+      text("limit 35°", x0 + w, Y(35) - 8, 12, C("--rud"), "right", false);
+      const kps = [{ kp: 0.5, col: C("--boat") }, { kp: 1, col: C("--err2") }, { kp: 3.5, col: C("--p") }];
+      for (const k of kps) {
+        const full = 35 / k.kp;
+        g.strokeStyle = k.col; g.lineWidth = 3; g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(Math.min(full, eMax)), Y(Math.min(k.kp * eMax, 35))); if (full < eMax) { g.lineTo(X(eMax), Y(35)); } g.stroke();
+        g.fillStyle = k.col; g.beginPath(); g.arc(X(full), Y(35), 5, 0, 7); g.fill();
+      }
+      text("Kp = 35 ÷ (how wrong for FULL rudder)", 240, 60, 16, C("--say"));
+      text("3.5 = 35 ÷ 10", 240, 88, 16, C("--p")); text("1 = 35 ÷ 35", 240, 112, 15, C("--err2")); text("0.5 = 35 ÷ 70", 240, 136, 15, C("--boat"));
+      // right: the same boat with each choice (P alone, no wind)
+      const gr = graph(560, 60, 400, 330, { tMax: 40, vMin: 0, vMax: 110, now: t, label: "heading", ticks: [0, 45, 90], xStep: 10, lines: [{ v: 90, col: C("--goal"), label: "SP" }],
+        series: [{ rows: KP_05, value: x => x.heading, col: C("--boat"), name: "0.5", nameDy: 14 }, { rows: KP_1, value: x => x.heading, col: C("--err2"), name: "1", nameDy: 0 },
+                 { rows: KP_35, value: x => x.heading, col: C("--p"), name: "3.5", nameDy: -14 }] });
+      if (t > 25) {
+        const t85 = rows => fmt(rows.find(x => x.heading >= 85).t);
+        text("Kp 0.5: 85° at " + t85(KP_05) + " s, highest " + fmt(maxOf(KP_05, "heading")) + "°", 760, 448, 14, C("--boat"));
+        text("Kp 3.5: 85° at " + t85(KP_35) + " s, highest " + fmt(maxOf(KP_35, "heading")) + "°", 760, 472, 14, C("--p"));
+        text("LQR (lesson 3) CALCULATES its gains from the boat's model", 760, 500, 13, C("--say"), "center", false);
+      }
   } },
   { title: "P = Kp × error", cap: "P copies the error's shape, made Kp times bigger (Kp = 0.5)", dur: 12, draw(t) {
       const r = at(STEP, t);
@@ -582,12 +614,13 @@ const CLAMP = "clamp(…, −35, +35) = Mathf.Clamp: the rudder can't go further
 const FORMULAS = {
   "the loop": ["error = setpoint − process variable", "error = goal − where the nose is · rudder = clamp(P + I + D, −35, +35)"],
   "the parts, one by one": ["setpoint → ± → PID → output → final control element → process → transmitter", "goal → compare → brain → order → rudder → ship → compass → back"],
-  "what the order means": ["output = P + I + D", "sign = which way · size = how hard · rudder = clamp(order, −35, +35)"],
+  "what the order means": ["output = P + I + D", "sign = which way · size = how hard · rudder = clamp(order, −35, +35) · Kp 3.5 = 35 ÷ 10: full rudder at 10° wrong"],
   "P = Kp × error": ["P = Kp · e(t)", "P = X × error · X = rudder ° per 1° wrong (here X = 0.5) · rudder = clamp(P, −35, +35)"],
   "P alone on the boat": ["P = Kp · e(t), Kp = 3", "rudder = clamp(3 × error, −35, +35) · above 35 / 3 = 11.7° wrong → always full 35°"],
   "offset: P alone + wind": ["P = Kp · e(t) → steady-state error (offset)", "the wind needs 9° rudder · 9 = X × error → error must stay 9 / X"],
   "I without wind": ["I = Ki · ∫ e(t) dt", "every 0.1 s: sum = sum + error × 0.1 · I = Y × sum (Y = 0.1)"],
   "I = Ki × (error × time)": ["I = Ki · ∫ e(t) dt", "every 0.1 s: sum = sum + error × 0.1 · I = Y × sum · rudder = clamp(X·error + I, −35, +35)"],
+  "where does Kp come from?": ["Kp = a gain, chosen by tuning (or computed: LQR, Ziegler–Nichols)", "X = 35 ÷ (how many degrees wrong I want FULL rudder) · 10° → X = 3.5 · 70° → X = 0.5"],
   "P + I on the boat, NO wind": ["u = Kp · e + Ki · ∫ e dt", "rudder = clamp(X × error + Y × sum, −35, +35) · X = 1, Y = 0.05 · no wind: P alone ends at 90°, so I is only extra push"],
   "P + I on the boat, in the wind": ["u = Kp · e + Ki · ∫ e dt", "rudder = clamp(X × error + Y × sum, −35, +35) · X = 1, Y = 0.05"],
   "D = Kd × slope": ["D = Kd · de(t)/dt", "D = Z × how fast the error changes = Z × (−turn) · Z = 6"],
