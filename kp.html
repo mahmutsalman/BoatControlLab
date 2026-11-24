@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where Kp Comes From</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1b2a;--panel:#112236;--line:#1e4060;--text:#d4e8f7;--say:#a8c2d4;--dim:#8aa3b5;
+  --boat:#f2f2f2;--goal:#7fd77f;--err:#5b8cff;--err2:#4fe0b0;--p:#8f7cff;--i:#ff6ad5;--d:#4aa3ff;--rud:#c792ea;--far:#ef5f6b;--turn:#4fd1c5;--wind:#f4a261}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px "IBM Plex Mono",monospace;display:flex;flex-direction:column;align-items:center;padding:16px}
+.top{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--line);cursor:pointer}
+.dot.on{background:var(--text)}
+button,a.btn{font:inherit;background:var(--line);color:var(--text);border:0;border-radius:8px;padding:6px 14px;cursor:pointer;text-decoration:none}
+h1{font-size:28px;margin:6px 0 4px}
+canvas{width:min(1000px,100%);background:var(--panel);border-radius:14px;display:block}
+.cap{font-size:22px;color:var(--say);margin:14px 0 4px;text-align:center}
+.hint{color:var(--dim);font-size:13px}
+.mine{display:none;width:min(1000px,100%);margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 16px;font-size:16px;line-height:1.8}
+.mine .k{color:var(--dim);display:inline-block;min-width:130px}
+.calc{display:none;width:min(1000px,100%);margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 18px}
+.calc h3{margin:0 0 8px;font-size:18px}
+.calc label{display:flex;gap:12px;align-items:center;margin:6px 0;color:var(--say)}
+.calc input{flex:1}
+.calc .v{min-width:70px;font-weight:600;color:var(--text)}
+.calc pre{font:18px/1.7 "IBM Plex Mono",monospace;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="top"><a class="btn" href="index.html">⌂</a><button id="prev">←</button><div id="dots" style="display:flex;gap:8px"></div><button id="next">→</button></div>
+<h1 id="title"></h1>
+<canvas id="cv" width="1000" height="520"></canvas>
+<div class="cap" id="cap"></div>
+<div class="mine" id="mine"></div>
+<div class="hint">← → next screen · space = pause · it loops</div>
+<div class="calc" id="calc">
+  <h3>🧮 P calculator: drag the error and Kp</h3>
+  <label><span style="color:var(--err)">error</span><input type="range" id="cErr" min="-100" max="100" step="5" value="100"><span class="v" id="cErrV"></span></label>
+  <label><span style="color:var(--p)">Kp</span><input type="range" id="cKp" min="0" max="3" step="0.1" value="0.5"><span class="v" id="cKpV"></span></label>
+  <pre id="cOut"></pre>
+  <canvas id="cCv" width="960" height="110" style="width:100%;height:110px;background:#0a1624"></canvas>
+</div>
+
+<script>
+// ---------- the boat and a PID captain (same model as the lab) ----------
+const DT = 0.1, KB = 0.2, T = 3, LIMIT = 35, GOAL = 90;
+function clip(x) {
+  if (x > LIMIT) { return LIMIT; }
+  if (x < -LIMIT) { return -LIMIT; }
+  return x;
+}
+// one trip with a PID captain; every 0.1 s we keep every number so the screens can show it
+function pidTrip(Kp, Ki, Kd, wind, seconds) {
+  let heading = 0, turn = 0, sum = 0;
+  const rows = [];
+  for (let n = 0; n <= seconds / DT; n++) {
+    const error = GOAL - heading;
+    const p = Kp * error;
+    const d = Kd * (-turn);                       // the error shrinks as fast as the boat turns
+    const wantsIfAdded = p + Ki * (sum + error * DT) + d;
+    if (Ki > 0 && Math.abs(wantsIfAdded) < LIMIT) {
+      sum += error * DT;                           // the memory only grows while the rudder is not stuck at the limit
+    }
+    const i = Ki * sum;
+    const rudder = clip(p + i + d);
+    rows.push({ t: n * DT, heading, turn, error, p, i, d, rudder });
+    const newTurn = turn + DT * ((KB * rudder - turn) / T + wind);
+    heading = heading + DT * newTurn;
+    turn = newTurn;
+  }
+  return rows;
+}
+// a trip with any start and any push from the sea (push(t) in °/s²), same PID rules as pidTrip
+function seaTrip(o) {
+  let heading = o.start, turn = 0, sum = 0;
+  const rows = [];
+  for (let n = 0; n <= o.seconds / DT; n++) {
+    const t = n * DT, error = GOAL - heading;
+    const p = o.Kp * error;
+    const d = o.Kd * (-turn);
+    const wantsIfAdded = p + o.Ki * (sum + error * DT) + d;
+    if (o.Ki > 0 && Math.abs(wantsIfAdded) < LIMIT) { sum += error * DT; }
+    const i = o.Ki * sum;
+    const rudder = clip(p + i + d);
+    rows.push({ t, heading, turn, error, sum, p, i, d, rudder });
+    const newTurn = turn + DT * ((KB * rudder - turn) / T + o.push(t));
+    heading = heading + DT * newTurn;
+    turn = newTurn;
+  }
+  return rows;
+}
+const at = (rows, t) => rows[Math.min(rows.length - 1, Math.floor(t / DT))];
+const fmt = x => (Math.round(x * 10) / 10).toFixed(1);
+const maxOf = (rows, key) => Math.max(...rows.map(r => r[key]));
+
+// ---------- drawing helpers ----------
+const cv = document.getElementById("cv"), g = cv.getContext("2d");
+const C = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const ang = d => (d - 90) * Math.PI / 180;
+function text(s, x, y, size, col, align = "center", bold = true) {
+  g.font = (bold ? "600 " : "") + size + "px IBM Plex Mono"; g.fillStyle = col; g.textAlign = align; g.fillText(s, x, y);
+}
+// a ship seen from above, bow pointing up (−y), centred on the origin of the current transform
+function shipShape(L, B, col) {
+  // the white wake behind the stern: two lines opening into a V
+  g.strokeStyle = "rgba(242,242,242,.22)"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(-B * 0.6, L / 2); g.lineTo(-B * 1.6, L * 1.05); g.moveTo(B * 0.6, L / 2); g.lineTo(B * 1.6, L * 1.05); g.stroke();
+  // the hull: a pointed bow, straight sides, a flat stern
+  g.fillStyle = col;
+  g.beginPath();
+  g.moveTo(0, -L / 2);
+  g.quadraticCurveTo(B * 1.05, -L * 0.28, B, -L * 0.05);
+  g.lineTo(B * 0.9, L / 2);
+  g.lineTo(-B * 0.9, L / 2);
+  g.lineTo(-B, -L * 0.05);
+  g.quadraticCurveTo(-B * 1.05, -L * 0.28, 0, -L / 2);
+  g.fill();
+  g.strokeStyle = "rgba(13,27,42,.55)"; g.lineWidth = 1.5; g.stroke();
+  // the deck line and the bridge (cabin) near the stern
+  g.strokeStyle = "rgba(13,27,42,.35)"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, -L * 0.38); g.lineTo(0, L * 0.05); g.stroke();
+  g.fillStyle = "#5a7d9a"; g.fillRect(-B * 0.55, L * 0.12, B * 1.1, L * 0.22);
+  g.fillStyle = "#9fd0f0"; g.fillRect(-B * 0.45, L * 0.13, B * 0.9, L * 0.04);   // the bridge windows look forward
+  // the bow: a small dark mark so the front is obvious
+  g.fillStyle = "rgba(13,27,42,.7)"; g.beginPath(); g.arc(0, -L * 0.36, Math.max(2.5, B * 0.12), 0, 7); g.fill();
+}
+function boat(cx, cy, R, heading, rudder, col) {
+  g.strokeStyle = C("--line"); g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.stroke();
+  g.setLineDash([7, 5]); g.strokeStyle = C("--goal"); g.lineWidth = 3;
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(ang(GOAL)) * R, cy + Math.sin(ang(GOAL)) * R); g.stroke(); g.setLineDash([]);
+  g.save(); g.translate(cx, cy); g.rotate(heading * Math.PI / 180);
+  const L = R * 0.85, B = R * 0.24;
+  shipShape(L, B, col || C("--boat"));
+  g.translate(0, L / 2); g.rotate(-rudder * Math.PI / 180);
+  g.strokeStyle = C("--rud"); g.lineWidth = 6; g.lineCap = "round"; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, L * 0.3); g.stroke();
+  g.restore();
+}
+// a time graph like the video's: axes, an optional dashed setpoint, one or more lines drawn up to "now"
+function graph(x, y, w, h, opt) {
+  const X = t => x + t / opt.tMax * w, Y = v => y + h - (v - opt.vMin) / (opt.vMax - opt.vMin) * h;
+  g.strokeStyle = C("--dim"); g.lineWidth = 2;
+  g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x, y + h); g.lineTo(x + w + 8, y + h); g.stroke();
+  text(opt.label, x - 12, y - 14, 15, C("--dim"), "left");
+  if (!opt.xStep) { text("time", x + w, y + h + 20, 13, C("--dim"), "right", false); }
+  for (const v of (opt.ticks || [])) {                   // numbers on the y axis + a light grid
+    g.strokeStyle = "rgba(138,163,181,.15)"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, Y(v)); g.lineTo(x + w, Y(v)); g.stroke();
+    text(String(v), x - 6, Y(v) + 4, 12, C("--dim"), "right", false);
+  }
+  if (opt.xStep) {                                         // numbers on the time axis
+    for (let tt = 0; tt <= opt.tMax; tt += opt.xStep) { text(tt + "s", X(tt), y + h + 16, 12, C("--dim"), "center", false); }
+  }
+  for (const hl of (opt.lines || [])) {
+    g.setLineDash([6, 5]); g.strokeStyle = hl.col; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x, Y(hl.v)); g.lineTo(x + w, Y(hl.v)); g.stroke(); g.setLineDash([]);
+    text(hl.label, x - 8, Y(hl.v) + 5, 13, hl.col, "right");
+  }
+  for (const s of opt.series) {
+    g.strokeStyle = s.col; g.lineWidth = 3; g.beginPath();
+    let first = true, last = null;
+    for (const r of s.rows) {
+      if (r.t > opt.now) { break; }
+      const v = s.value(r);
+      if (first) { g.moveTo(X(r.t), Y(v)); first = false; } else { g.lineTo(X(r.t), Y(v)); }
+      last = { x: X(r.t), y: Y(v) };
+    }
+    g.stroke();
+    if (s.name && last) { text(s.name, last.x + 8, last.y + (s.nameDy || 0) + 5, 13, s.col, "left"); }   // the line's name at its tip
+  }
+  return { X, Y };
+}
+// one bar per part (P, I, D) and their sum: the rudder
+function bars(x, y, parts) {
+  const scale = 5, mid = x + 150;
+  g.strokeStyle = C("--line"); g.lineWidth = 1; g.beginPath(); g.moveTo(mid, y - 18); g.lineTo(mid, y + parts.length * 34); g.stroke();
+  parts.forEach((p, k) => {
+    const yy = y + k * 34, len = Math.max(-140, Math.min(140, p.v * scale / 1.4));
+    g.fillStyle = p.col; g.fillRect(Math.min(mid, mid + len), yy, Math.abs(len), 22);
+    text(p.name, x, yy + 17, 16, p.col, "left");
+    text(fmt(p.v) + "°", x + 310, yy + 17, 16, p.col, "left");
+  });
+}
+function pinkArrow(x, y1, y2, label) {
+  g.strokeStyle = C("--i"); g.fillStyle = C("--i"); g.lineWidth = 4;
+  g.beginPath(); g.moveTo(x, y1); g.lineTo(x, y2); g.stroke();
+  const dir = y2 > y1 ? 1 : -1;
+  g.beginPath(); g.moveTo(x - 8, y2 - dir * 12); g.lineTo(x + 8, y2 - dir * 12); g.lineTo(x, y2); g.fill();
+  text(label, x + 14, (y1 + y2) / 2 + 6, 18, C("--i"), "left");
+}
+
+// ---------- the trips every screen uses (all from the model above) ----------
+const LOOP = pidTrip(3.5, 0.1, 6, 0, 30);
+const P_ALONE = pidTrip(3, 0, 0, 0, 30);
+const P_WIND_1 = pidTrip(1, 0, 0, -0.6, 50);
+const P_WIND_3 = pidTrip(3, 0, 0, -0.6, 50);
+const PI_WIND = pidTrip(1, 0.05, 0, -0.6, 50);
+const KP_05 = pidTrip(0.5, 0, 0, 0, 40), KP_1 = pidTrip(1, 0, 0, 0, 40), KP_35 = pidTrip(3.5, 0, 0, 0, 40);   // where Kp comes from: the same boat, three choices
+const P_CALM_1 = pidTrip(1, 0, 0, 0, 50);       // no wind, P alone (Kp 1)
+const PI_CALM = pidTrip(1, 0.05, 0, 0, 50);      // no wind, P + I (the same Kp 1, Ki 0.05 as the wind screen)
+const PD = pidTrip(3, 0, 6, 0, 30);
+const TUNED = pidTrip(3.5, 0.1, 6, -0.6, 40);
+const SIDE_0 = pidTrip(3, 0, 0, 0, 36);
+const SIDE_6 = pidTrip(3, 0, 6, 0, 36);
+const SIDE_10 = pidTrip(3, 0, 10, 0, 36);
+const ONLY_P = pidTrip(3, 0, 0, 0, 40);
+const I_CALM_P = seaTrip({ start: 60, Kp: 1, Ki: 0, Kd: 0, seconds: 40, push: () => 0 });     // no wind, P alone
+const I_CALM_PI = seaTrip({ start: 60, Kp: 1, Ki: 0.1, Kd: 0, seconds: 40, push: () => 0 });  // no wind, P + I
+const I_WIND = seaTrip({ start: 90, Kp: 1, Ki: 0.1, Kd: 0, seconds: 40, push: () => -0.6 });   // on the line, then a steady wind
+function gust(t) { if (t >= 2 && t < 3.5) { return -3; } return 0; }                       // a 1.5 s gust pushing the bow left
+const GUST_NONE = seaTrip({ start: 90, Kp: 0, Ki: 0, Kd: 0, seconds: 20, push: gust });
+const GUST_D = seaTrip({ start: 90, Kp: 0, Ki: 0, Kd: 6, seconds: 20, push: gust });
+const ONLY_I = pidTrip(0, 0.1, 0, 0, 40);
+const ONLY_D = pidTrip(0, 0, 6, 0, 40);
+// the "what the order means" boats: start somewhere, hold ONE rudder order, watch which way the nose goes
+function holdRudder(startHeading, rudder, seconds) {
+  let heading = startHeading, turn = 0;
+  const rows = [];
+  for (let n = 0; n <= seconds / DT; n++) {
+    rows.push({ t: n * DT, heading, rudder });
+    turn = turn + DT * ((KB * rudder - turn) / T);
+    heading = heading + DT * turn;
+  }
+  return rows;
+}
+const ORDER_RIGHT = holdRudder(60, 35, 6);
+const ORDER_LEFT = holdRudder(120, -35, 6);
+const ORDER_HOLD = holdRudder(90.8, 0, 6);
+// scripted inputs for the "what does this block do with an error" screens (like the video's step graphs)
+function scripted(seconds, errorAt) {
+  const rows = [];
+  for (let n = 0; n <= seconds / DT; n++) { rows.push({ t: n * DT, e: errorAt(n * DT) }); }
+  return rows;
+}
+// 20° → 60° → 20°, each change taking 1 s (a ship can't jump)
+const STEP = scripted(12, t => {
+  if (t < 3) { return 20; }
+  if (t < 4) { return 20 + 40 * (t - 3); }
+  if (t < 9) { return 60; }
+  if (t < 10) { return 60 - 40 * (t - 9); }
+  return 20;
+});
+const SMALL = scripted(12, t => { if (t < 6) { return 20; } return 0; });
+const BIG = scripted(12, t => { if (t < 8) { return 40; } return 0; });
+function areaUpTo(rows, t) { let a = 0; for (const r of rows) { if (r.t >= t) { break; } a += r.e * DT; } return a; }
+function ramp(slope) { return scripted(10, t => { if (t < 2) { return 10; } if (t < 7) { return 10 + slope * (t - 2); } return 10 + slope * 5; }); }
+const RAMP5 = ramp(5), RAMP8 = ramp(8);
+function slopeAt(t, slope) { if (t >= 2 && t < 7) { return slope; } return 0; }
+
+// ---------- the 4 steps of "where does Kp come from?" (his ask 2026-11-24: "I didn't understand anything… explain easily… create a page") ----------
+const KP = 3.5;
+const KP_FAST = pidTrip(3.5, 0, 0, 0, 40), KP_SLOW = pidTrip(0.5, 0, 0, 0, 40);   // the same boat, P alone, no wind
+const reach = (rows, h) => rows.find(x => x.heading >= h).t;
+// the machine: [error] → [× Kp] → [clamp ±35] → [rudder]
+function machine(y, err, kp) {
+  const raw = kp * err, rud = clip(raw), clamped = Math.abs(raw) > LIMIT;
+  const box = (x, w, label, val, col) => {
+    g.strokeStyle = col; g.lineWidth = 3; g.beginPath(); g.roundRect(x, y, w, 70, 12); g.stroke();
+    text(label, x + w / 2, y + 26, 15, C("--dim"), "center", false); text(val, x + w / 2, y + 56, 24, col);
+  };
+  const arrow = (x1, x2) => { g.strokeStyle = C("--dim"); g.lineWidth = 2; g.beginPath(); g.moveTo(x1, y + 35); g.lineTo(x2 - 8, y + 35); g.stroke();
+    g.fillStyle = C("--dim"); g.beginPath(); g.moveTo(x2, y + 35); g.lineTo(x2 - 12, y + 28); g.lineTo(x2 - 12, y + 42); g.fill(); };
+  box(430, 130, "wrong by", fmt(err) + "°", C("--err")); arrow(560, 600);
+  box(600, 110, "× Kp", "× " + kp, C("--p")); arrow(710, 740);
+  box(740, 110, "= " + (clamped ? "too big" : "order"), fmt(raw), clamped ? C("--far") : C("--p")); arrow(850, 870);
+  box(870, 110, "rudder", fmt(rud) + "°", C("--rud"));
+  if (clamped) { text("max is 35 → clamp → 35", 925, y + 100, 15, C("--far")); }
+}
+const SCREENS = [
+  { title: "Kp is just a multiplier", cap: "rudder = Kp × how wrong · Kp 3.5 = for every 1° wrong, 3.5° of rudder", dur: 14, speed: 1, draw(t) {
+      let err = 0;                                       // the boat drifts off: 0° → 2° → 10° → 30° wrong, a few seconds each
+      if (t < 3) { err = 2 * t / 3; } else if (t < 5) { err = 2; } else if (t < 7) { err = 2 + 8 * (t - 5) / 2; } else if (t < 9) { err = 10; } else if (t < 11) { err = 10 + 20 * (t - 9) / 2; } else { err = 30; }
+      const rud = clip(KP * err);
+      boat(200, 230, 150, GOAL - err, rud);
+      text("goal 90°", 200, 420, 15, C("--goal"));
+      text("1° wrong → 3.5° rudder", 680, 90, 22, C("--p"));
+      text("like mouse sensitivity in a game: you SET it, nobody measures it", 680, 125, 15, C("--say"), "center", false);
+      machine(190, err, KP);
+      text("rudder = 3.5 × " + fmt(err) + " = " + fmt(KP * err), 680, 360, 22, C("--p"));
+      if (KP * err > LIMIT) { text("but the rudder stops at 35° (clamp)", 680, 395, 18, C("--far")); }
+  } },
+  { title: "three boats, Kp = 3.5", cap: "small error → small rudder · from 10° wrong on, the rudder is already full", dur: 4, draw(t) {
+      const cases = [{ err: 2 }, { err: 10 }, { err: 30 }];
+      cases.forEach((c, n) => {
+        const cx = 170 + n * 330, raw = KP * c.err, rud = clip(raw);
+        boat(cx, 160, 105, GOAL - c.err, rud);
+        text("wrong by " + c.err + "°", cx, 305, 21, C("--err"));
+        text("3.5 × " + c.err + " = " + fmt(raw), cx, 345, 19, C("--p"));
+        let out = "rudder " + fmt(rud) + "°", col = C("--rud");
+        if (raw > LIMIT) { out = "too big → clamp → 35°"; col = C("--far"); }
+        text(out, cx, 385, 19, col);
+        let say = "a small push";
+        if (c.err === 10) { say = "exactly FULL"; }
+        if (c.err === 30) { say = "full (same as 10°)"; }
+        text(say, cx, 430, 17, C("--say"), "center", false);
+      });
+  } },
+  { title: "where 3.5 came from", cap: "ONE question: how wrong should the boat be before the rudder is turned ALL the way?", dur: 16, speed: 1, draw(t) {
+      let E = 10;                                        // his answer moves: 10° → 70° → back to 10°
+      if (t > 4 && t < 8) { E = 10 + 60 * (t - 4) / 4; } else if (t >= 8 && t < 12) { E = 70; } else if (t >= 12) { E = 70 - 60 * (t - 12) / 4; }
+      const kp = LIMIT / E;
+      text("my answer:", 230, 70, 20, C("--say"), "center", false);
+      text(fmt(E) + "° wrong", 230, 110, 30, C("--err"));
+      text("Kp = 35 ÷ " + fmt(E), 230, 170, 26, C("--p"));
+      text("= " + (Math.round(kp * 100) / 100), 230, 210, 30, C("--p"));
+      text("35 = the rudder's max", 230, 260, 15, C("--rud"), "center", false);
+      if (E < 11) { text("10° → 3.5 (our lessons)", 230, 300, 17, C("--goal")); }
+      if (E > 69) { text("70° → 0.5", 230, 300, 17, C("--goal")); }
+      // the rule as a line: rudder rises with the error, FULL at E
+      const x0 = 480, y0 = 430, w = 460, h = 300, eMax = 80;
+      const X = e => x0 + e / eMax * w, Y = r => y0 - r / 40 * h;
+      g.strokeStyle = C("--dim"); g.lineWidth = 2; g.beginPath(); g.moveTo(x0, y0 - h - 8); g.lineTo(x0, y0); g.lineTo(x0 + w + 8, y0); g.stroke();
+      text("rudder °", x0 - 10, y0 - h - 16, 14, C("--dim"), "left");
+      text("how wrong (°)", x0 + w, y0 + 40, 13, C("--dim"), "right", false);
+      for (const e of [0, 10, 20, 40, 70]) { text(String(e), X(e), y0 + 20, 12, C("--dim"), "center", false); }
+      for (const r of [0, 35]) { text(String(r), x0 - 8, Y(r) + 4, 12, C("--dim"), "right", false); }
+      g.setLineDash([6, 5]); g.strokeStyle = C("--rud"); g.lineWidth = 1.5; g.beginPath(); g.moveTo(x0, Y(35)); g.lineTo(x0 + w, Y(35)); g.stroke(); g.setLineDash([]);
+      g.strokeStyle = C("--p"); g.lineWidth = 4; g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(E), Y(35)); g.lineTo(X(eMax), Y(35)); g.stroke();
+      g.fillStyle = C("--err"); g.beginPath(); g.arc(X(E), Y(35), 8, 0, 7); g.fill();
+      g.setLineDash([3, 4]); g.strokeStyle = C("--err"); g.lineWidth = 1.5; g.beginPath(); g.moveTo(X(E), Y(35)); g.lineTo(X(E), y0); g.stroke(); g.setLineDash([]);
+      text("full rudder here", X(E), Y(35) - 16, 14, C("--err"));
+  } },
+  { title: "what the choice changes", cap: "big Kp = fast but goes PAST 90° · small Kp = calm but slow · picking one = TUNING", dur: 40, speed: 2.5, draw(t) {
+      const a = at(KP_FAST, t), b = at(KP_SLOW, t);
+      boat(120, 140, 90, a.heading, a.rudder, C("--p")); text("Kp 3.5", 120, 255, 17, C("--p"));
+      boat(120, 375, 90, b.heading, b.rudder); text("Kp 0.5", 120, 490, 17, C("--boat"));
+      const gr = graph(300, 50, 420, 380, { tMax: 40, vMin: 0, vMax: 110, now: t, label: "heading", ticks: [0, 45, 90], xStep: 10, lines: [{ v: 90, col: C("--goal"), label: "SP" }],
+        series: [{ rows: KP_FAST, value: x => x.heading, col: C("--p"), name: "3.5", nameDy: -12 }, { rows: KP_SLOW, value: x => x.heading, col: C("--boat"), name: "0.5", nameDy: 12 }] });
+      if (t > 16) {
+        text("Kp 3.5", 860, 120, 20, C("--p"));
+        text("85° at " + fmt(reach(KP_FAST, 85)) + " s: FAST", 860, 152, 16, C("--p"), "center", false);
+        text("but goes to " + fmt(maxOf(KP_FAST, "heading")) + "°", 860, 180, 16, C("--far"), "center", false);
+      }
+      if (t > 24) {
+        text("Kp 0.5", 860, 260, 20, C("--boat"));
+        text("85° at " + fmt(reach(KP_SLOW, 85)) + " s: SLOW", 860, 292, 16, C("--boat"), "center", false);
+        text("but stops at " + fmt(maxOf(KP_SLOW, "heading")) + "°", 860, 320, 16, C("--goal"), "center", false);
+      }
+      if (t > 32) { text("neither is wrong: you pick", 860, 400, 17, C("--say")); text("= tuning", 860, 430, 20, C("--goal")); }
+  } },
+];
+
+// ---------- the formulas, two ways ----------
+const FORMULAS = {
+  "Kp is just a multiplier": ["P = Kp · e(t)", "rudder = clamp(3.5 × how wrong, −35, +35)"],
+  "three boats, Kp = 3.5": ["P = Kp · e(t), saturated at ±35°", "2° → 7° · 10° → 35° · 30° → 105 → clamp → 35°"],
+  "where 3.5 came from": ["Kp = a gain you choose (tuning)", "Kp = 35 ÷ (how wrong for FULL rudder) · 10° → 3.5 · 70° → 0.5"],
+  "what the choice changes": ["higher Kp → faster rise, more overshoot", "3.5: fast, past 90° · 0.5: slow, no overshoot"],
+};
+function showFormulas() {
+  const f = FORMULAS[SCREENS[idx].title], box = document.getElementById("mine");
+  if (!f) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.innerHTML = `<span class="k">📘 textbook</span>${f[0]}<br><span class="k">📝 my way</span><b>${f[1]}</b>`;
+}
+// ---------- player ----------
+let idx = 0, t0 = performance.now(), paused = false, pausedAt = 0;
+const dots = document.getElementById("dots");
+dots.innerHTML = SCREENS.map((_, i) => `<div class="dot" data-i="${i}"></div>`).join("");
+dots.onclick = e => { if (e.target.dataset.i) { show(+e.target.dataset.i); } if (document.activeElement) { document.activeElement.blur(); } };
+function show(i) {
+  idx = (i + SCREENS.length) % SCREENS.length; t0 = performance.now(); pausedAt = t0;
+  document.getElementById("title").textContent = (idx + 1) + " · " + SCREENS[idx].title;
+  document.getElementById("cap").textContent = SCREENS[idx].cap;
+  [...dots.children].forEach((d, k) => d.classList.toggle("on", k === idx));
+  // the calculator lives under the "P = Kp × error" screen only
+  let showCalc = "none";
+  if (SCREENS[idx].title === "P = Kp × error") { showCalc = "block"; }
+  document.getElementById("calc").style.display = showCalc;
+  showFormulas();
+}
+document.getElementById("prev").onclick = e => { e.currentTarget.blur(); show(idx - 1); };
+document.getElementById("next").onclick = e => { e.currentTarget.blur(); show(idx + 1); };
+window.addEventListener("keyup", e => { if (e.key === " ") { e.preventDefault(); } });
+window.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") { return; }   // arrows on a slider move the slider, not the screen
+  if (e.key === "ArrowRight") { show(idx + 1); }
+  if (e.key === "ArrowLeft") { show(idx - 1); }
+  if (e.key === " ") { e.preventDefault(); paused = !paused; if (paused) { pausedAt = performance.now(); } else { t0 += performance.now() - pausedAt; } }
+});
+function frame(now) {
+  requestAnimationFrame(frame);
+  const r = window.devicePixelRatio || 1;
+  if (cv.width !== 1000 * r) { cv.width = 1000 * r; cv.height = 520 * r; }
+  g.setTransform(r, 0, 0, r, 0, 0);
+  const S = SCREENS[idx], speed = S.speed || 1, clock = paused ? pausedAt : now;
+  const loop = S.dur / speed + 3;
+  const elapsed = Math.max(0, (clock - t0) / 1000);   // a frame's timestamp can be a little EARLIER than the click that set t0
+  const t = Math.min(S.dur, (elapsed % loop) * speed);
+  g.clearRect(0, 0, 1000, 520);
+  try {
+    S.draw(t);
+  } catch (err) {                                   // never let one screen freeze the whole lesson
+    g.setTransform(1, 0, 0, 1, 0, 0); g.font = "600 18px IBM Plex Mono"; g.fillStyle = "#ef5f6b"; g.textAlign = "left";
+    g.fillText("screen error: " + err.message, 20, 40);
+    console.error(err);
+  }
+  if (paused) {                                       // show that space DID something
+    g.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    g.fillStyle = "rgba(239,95,107,.9)"; g.fillRect(860, 12, 124, 34);
+    g.font = "600 17px IBM Plex Mono"; g.fillStyle = "#fff"; g.textAlign = "center"; g.fillText("⏸ paused", 922, 35);
+  }
+}
+// ---------- the P calculator ----------
+function calcPaint() {
+  const error = parseFloat(document.getElementById("cErr").value);
+  const kp = parseFloat(document.getElementById("cKp").value);
+  const p = kp * error;
+  let rudder = p;
+  let note = "";
+  if (p > LIMIT) { rudder = LIMIT; note = "  ← above +35: the rudder stops at 35"; }
+  else if (p < -LIMIT) { rudder = -LIMIT; note = "  ← below −35: the rudder stops at −35"; }
+  let way = "straight";
+  if (rudder > 0) { way = "turn RIGHT"; }
+  if (rudder < 0) { way = "turn LEFT"; }
+  let clampAt = "   · X = 0: never turns";
+  if (kp > 0) { clampAt = "   · clamped when |error| > 35 / " + kp.toFixed(1) + " = " + fmt(35 / kp) + "°"; }
+  document.getElementById("cErrV").textContent = error + "°";
+  document.getElementById("cKpV").textContent = kp.toFixed(1);
+  document.getElementById("cOut").innerHTML =
+    `<span style="color:var(--p)">P</span> = Kp × error = ${kp.toFixed(1)} × ${error} = <b style="color:var(--p)">${fmt(p)}</b>${note}\n` +
+    `<span style="color:var(--rud)">rudder</span> = <b style="color:var(--rud)">${fmt(rudder)}°</b> → ${way}` +
+    `\n📝 rudder = clamp(${kp.toFixed(1)} × error, −35, +35)` + clampAt;
+  // the rudder ruler: −35 … +35, the P order (may be outside) and the real rudder
+  const cv = document.getElementById("cCv"), c = cv.getContext("2d"), r = window.devicePixelRatio || 1;
+  cv.width = 960 * r; cv.height = 110 * r; c.setTransform(r, 0, 0, r, 0, 0);
+  const X = v => 480 + v / 110 * 440;
+  c.fillStyle = "rgba(239,95,107,.15)"; c.fillRect(X(-110), 30, X(-35) - X(-110), 40); c.fillRect(X(35), 30, X(110) - X(35), 40);
+  c.strokeStyle = "#8aa3b5"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(-110), 70); c.lineTo(X(110), 70); c.stroke();
+  c.font = "12px IBM Plex Mono"; c.fillStyle = "#8aa3b5"; c.textAlign = "center";
+  for (const v of [-100, -35, 0, 35, 100]) { c.beginPath(); c.moveTo(X(v), 66); c.lineTo(X(v), 74); c.stroke(); c.fillText(v + "°", X(v), 90); }
+  c.fillStyle = "#ef5f6b"; c.fillText("too far: not possible", X(-72), 24); c.fillText("too far: not possible", X(72), 24);
+  c.fillStyle = "#8f7cff"; c.beginPath(); c.arc(X(Math.max(-110, Math.min(110, p))), 50, 9, 0, 7); c.fill();
+  c.fillText("P", X(Math.max(-110, Math.min(110, p))), 18 + 0);
+  c.fillStyle = "#c792ea"; c.fillRect(X(rudder) - 3, 34, 6, 32);
+  c.fillText("rudder", X(rudder), 106);
+}
+document.getElementById("cErr").addEventListener("input", calcPaint);
+document.getElementById("cKp").addEventListener("input", calcPaint);
+calcPaint();
+show(0);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
